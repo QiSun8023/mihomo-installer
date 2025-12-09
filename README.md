@@ -34,9 +34,10 @@
 **方式一：标准安装 (推荐)**
 *适用于 VPS、海外服务器或网络环境良好的设备。*
 
-`git clone --depth 1 [https://github.com/QiSun8023/mihomo-installer.git](https://github.com/QiSun8023/mihomo-installer.git) \
-  && cd mihomo-installer \
-  && sudo bash install.sh`
+```bash
+git clone --branch feat-init --depth 1 https://gh-proxy.org/https://github.com/nelvko/clash-for-linux-install.git \
+  && cd clash-for-linux-install \
+  && bash install.sh
 
 **方式二：国内加速安装**
 *如果您的服务器位于国内，或无法连接 GitHub，请使用此镜像加速命令*
