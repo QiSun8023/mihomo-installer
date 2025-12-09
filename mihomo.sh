@@ -275,7 +275,7 @@ function update_core() {
     fi
 }
 
-# --- 功能 4: 更新 Geo ---
+# --- 功能 4: 更新 Geo [修复版：检测服务是否存在] ---
 function update_geodb() {
     echo -e "${YELLOW}更新数据库...${NC}"
     for url in \
@@ -288,28 +288,53 @@ function update_geodb() {
     
     echo -e "${GREEN}数据库更新完成。${NC}"
     
+    # 只有当服务文件存在时，才尝试重启
     if [ -f "/etc/systemd/system/mihomo.service" ]; then
         echo -e "${YELLOW}正在重启服务...${NC}"
         systemctl restart mihomo
     fi
 }
 
-# --- 功能 5: 更新 UI ---
+# --- 功能 5: 更新 UI [修复版：防止嵌套与报错] ---
 function update_ui() {
     echo -e "${YELLOW}更新 UI...${NC}"
+    
+    # 1. 建立临时目录
+    local TMP_UI_DIR="/tmp/mihomo_ui_extract"
+    rm -rf "$TMP_UI_DIR"
+    mkdir -p "$TMP_UI_DIR"
+
+    # 2. 下载
     wget -q -O "/tmp/z.zip" "https://github.com/Zephyruso/zashboard/archive/refs/heads/gh-pages.zip"
+    
     if [[ $? -eq 0 ]]; then
-        unzip -q -o "/tmp/z.zip" -d "/tmp/"
-        rm -rf "${CONFIG_DIR}/ui/zashboard"
-        mv "/tmp/zashboard-gh-pages" "${CONFIG_DIR}/ui/zashboard"
-        rm "/tmp/z.zip"
-        echo -e "${GREEN}UI 更新完成。${NC}"
+        # 3. 解压到临时目录
+        unzip -q -o "/tmp/z.zip" -d "$TMP_UI_DIR"
         
+        # 4. 找到解压后的内部文件夹 (通常是 zashboard-gh-pages，但为了保险用 ls 获取)
+        local EXTRACTED_DIR=$(ls "$TMP_UI_DIR" | head -n 1)
+        
+        if [[ -n "$EXTRACTED_DIR" ]]; then
+            # 5. 删除旧的 UI 目录 (防止嵌套)
+            rm -rf "${CONFIG_DIR}/ui/zashboard"
+            
+            # 6. 移动新文件
+            mv "$TMP_UI_DIR/$EXTRACTED_DIR" "${CONFIG_DIR}/ui/zashboard"
+            echo -e "${GREEN}UI 更新完成。${NC}"
+        else
+            echo -e "${RED}解压失败，未找到文件。${NC}"
+        fi
+
+        # 清理
+        rm -rf "$TMP_UI_DIR"
+        rm "/tmp/z.zip"
+        
+        # 7. 重启服务 (如果服务已安装)
         if [ -f "/etc/systemd/system/mihomo.service" ]; then
              systemctl restart mihomo
         fi
     else
-        echo -e "${RED}失败${NC}"
+        echo -e "${RED}下载失败${NC}"
     fi
 }
 
@@ -394,7 +419,7 @@ while true; do
     sleep 0.1
     clear
     echo -e "${BLUE}=====================================${NC}"
-    echo -e "${GREEN}      Mihomo 全能工具箱 (v2.8)       ${NC}"
+    echo -e "${GREEN}      Mihomo 全能工具箱 (v2.9)       ${NC}"
     echo -e "${BLUE}=====================================${NC}"
     echo -e "当前版本: ${YELLOW}${CURRENT_VER}${NC}"
     echo -e "最新稳定: ${LATEST_STABLE_VER}"
