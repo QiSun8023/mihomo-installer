@@ -35,7 +35,7 @@
 *适用于 VPS、海外服务器或网络环境良好的设备。*
 
 ```bash
-git clone --depth 1 [https://github.com/nelvko/clash-for-linux-install.git](https://github.com/QiSun8023/mihomo-installer.git) \
+git clone --depth 1 https://github.com/QiSun8023/mihomo-installer.git \
   && cd clash-for-linux-install \
   && bash install.sh
 ```
