@@ -1,5 +1,3 @@
-# config.yaml
-# ... (您的其他配置内容保持不变) ...
 proxy-providers:
   Airport1:
     url: "{{SUBSCRIPTION_URL}}"   # <--- 这里作为占位符
@@ -32,8 +30,6 @@ profile:
   store-selected: true
   store-fake-ip: true
 
-# 为防止使用插件朋友遇到面板问题，我注释掉了此模块。
-# 跑裸核朋友自行删除注释即可，使用nikki仅内核的ui路径改为/etc/nikki/run/ui
 external-controller: 0.0.0.0:9090
 secret: "Sq020216@qq.com"
 external-ui: "ui/zashboard"
