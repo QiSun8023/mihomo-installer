@@ -36,7 +36,7 @@ profile:
 # 跑裸核朋友自行删除注释即可，使用nikki仅内核的ui路径改为/etc/nikki/run/ui
 external-controller: 0.0.0.0:9090
 secret: "Sq020216@qq.com"
-external-ui: "UI/zashboard"
+external-ui: "ui/zashboard"
 external-ui-name: zashboard
 external-ui-url: "https://github.com/Zephyruso/zashboard/archive/refs/heads/gh-pages.zip"
 
