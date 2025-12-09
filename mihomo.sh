@@ -15,9 +15,6 @@ if [[ $EUID -ne 0 ]]; then
    exit 1
 fi
 
-# ========================================================
-# [全局] 捕捉 Ctrl+C 信号
-# ========================================================
 trap 'echo -e "\n${YELLOW}[提示] 操作已取消...${NC}"; sleep 1' SIGINT
 
 # ================= 辅助函数：版本检测 =================
@@ -25,39 +22,27 @@ CURRENT_VER="检测中..."
 LATEST_STABLE_VER="检测中..."
 LATEST_ALPHA_VER="检测中..."
 
-# 参数 $1: API URL, $2: is_alpha(1/0)
 function fetch_remote_version() {
     local url="$1"
     local is_alpha="$2"
-    local version=""
-    local commit_sha=""
+    local api_res=$(curl -s -m 10 "$url")
     
-    local api_res=$(curl -s -m 5 "$url")
-    if [[ -z "$api_res" ]] || [[ "$api_res" == *"API rate limit"* ]]; then
-        if netstat -tunlp 2>/dev/null | grep -q ":7890 "; then
-            api_res=$(curl -s -m 10 -x http://127.0.0.1:7890 "$url")
-        fi
-    fi
-    
-    if [[ -n "$api_res" ]] && [[ "$api_res" != *"Not Found"* ]]; then
-        version=$(echo "$api_res" | grep '"tag_name":' | head -n 1 | sed -E 's/.*"([^"]+)".*/\1/')
+    if [[ -n "$api_res" ]] && [[ "$api_res" != *"Not Found"* ]] && [[ "$api_res" != *"API rate limit"* ]]; then
+        local version=$(echo "$api_res" | grep '"tag_name":' | head -n 1 | sed -E 's/.*"([^"]+)".*/\1/')
         if [[ "$is_alpha" == "1" ]]; then
             local raw_filename=$(echo "$api_res" | grep -oE "alpha-[a-f0-9]{6,}\.gz" | head -n 1)
+            local commit_sha=""
             if [[ -n "$raw_filename" ]]; then
                 commit_sha=$(echo "$raw_filename" | sed -E 's/alpha-([a-f0-9]+)\.gz/\1/')
             fi
-            if [[ -z "$commit_sha" ]]; then
-                 commit_sha=$(echo "$api_res" | grep '"target_commitish":' | head -n 1 | sed -E 's/.*"([^"]+)".*/\1/' | cut -c 1-7)
+            if [[ -n "$version" ]] && [[ -n "$commit_sha" ]]; then
+                echo "${version} (${commit_sha})"
+                return
             fi
         fi
-    fi
-    
-    if [[ -z "$version" ]]; then echo "${RED}获取失败${NC}"; else
-        if [[ -n "$commit_sha" ]] && [[ "$commit_sha" != "main" ]]; then
-            echo "${version} (${commit_sha})"
-        else
-            echo "$version"
-        fi
+        echo "$version"
+    else
+        echo "获取失败"
     fi
 }
 
@@ -71,8 +56,16 @@ function check_versions() {
     fi
 
     if [[ "$LATEST_STABLE_VER" == "检测中..." ]] || [[ "$1" == "force" ]]; then
-        LATEST_STABLE_VER=$(fetch_remote_version "https://api.github.com/repos/MetaCubeX/mihomo/releases/latest" 0)
-        LATEST_ALPHA_VER=$(fetch_remote_version "https://api.github.com/repos/MetaCubeX/mihomo/releases/tags/Prerelease-Alpha" 1)
+        local stable_res=$(fetch_remote_version "https://api.github.com/repos/MetaCubeX/mihomo/releases/latest" 0)
+        local alpha_res=$(fetch_remote_version "https://api.github.com/repos/MetaCubeX/mihomo/releases/tags/Prerelease-Alpha" 1)
+        
+        if [[ "$stable_res" == "获取失败" ]]; then
+            LATEST_STABLE_VER="${RED}获取失败(API限制)${NC}"
+            LATEST_ALPHA_VER="${RED}获取失败${NC}"
+        else
+            LATEST_STABLE_VER="$stable_res"
+            LATEST_ALPHA_VER="$alpha_res"
+        fi
     fi
 }
 
@@ -100,47 +93,50 @@ function get_dashboard_info() {
 
     SHOW_LOCAL_IP=$(hostname -I | awk '{print $1}')
     [ -z "$SHOW_LOCAL_IP" ] && SHOW_LOCAL_IP="127.0.0.1"
-    
     SHOW_PUBLIC_IP=$(curl -s --connect-timeout 2 ifconfig.me)
     [ -z "$SHOW_PUBLIC_IP" ] && SHOW_PUBLIC_IP="${RED}获取超时${NC}"
 }
 
 # ================= 核心功能模块 =================
 
-# --- 功能 1: 安装/重装 Mihomo (无UI版) ---
+# --- 功能 1: 安装/重装 Mihomo (含UI直装) ---
 function install_mihomo() {
-    echo -e "${GREEN}=== 开始安装 Mihomo (无UI模式) ===${NC}"
+    echo -e "${GREEN}=== 开始安装 Mihomo (含UI) ===${NC}"
 
-    if ! command -v systemctl &> /dev/null; then
-        echo -e "${RED}错误: 未检测到 Systemd，无法安装。${NC}"; return
-    fi
-    if [[ ! -f "$TEMPLATE_FILE" ]]; then
-        echo -e "${RED}错误: 未找到 config.template.yaml 文件！${NC}"; return
-    fi
+    if ! command -v systemctl &> /dev/null; then echo -e "${RED}错误: 无 Systemd${NC}"; return; fi
+    if [[ ! -f "$TEMPLATE_FILE" ]]; then echo -e "${RED}错误: 缺少 config.template.yaml${NC}"; return; fi
 
-    echo -e "${YELLOW}> 检查系统依赖...${NC}"
+    echo -e "${YELLOW}> 检查依赖...${NC}"
     for dep in curl wget unzip gzip; do
         if ! command -v $dep &> /dev/null; then
-            echo "正在安装 $dep..."
             if command -v apt &> /dev/null; then apt update && apt install -y $dep || return
             elif command -v yum &> /dev/null; then yum install -y $dep || return
             else echo -e "${RED}无法安装 $dep${NC}"; return; fi
         fi
     done
 
-    echo -e "${YELLOW}> 获取最新版本信息...${NC}"
+    echo -e "${YELLOW}> 获取最新版本...${NC}"
     check_versions force
+    
+    local auto_version=$(echo "$LATEST_STABLE_VER" | sed -r "s/\x1B\[([0-9]{1,2}(;[0-9]{1,2})?)?[mGK]//g")
+    local install_version=""
 
-    echo -e "\n${BLUE}请选择要安装的版本:${NC}"
-    echo -e "1. ${GREEN}稳定版 (Stable)${NC}   -> ${LATEST_STABLE_VER}"
-    echo -e "2. ${YELLOW}开发版 (Alpha)${NC}    -> ${LATEST_ALPHA_VER}"
-    read -p "请输入选项 [默认1]: " ver_choice
-
-    local API_URL=""
-    case "$ver_choice" in
-        2) API_URL="https://api.github.com/repos/MetaCubeX/mihomo/releases/tags/Prerelease-Alpha" ;;
-        *) API_URL="https://api.github.com/repos/MetaCubeX/mihomo/releases/latest" ;;
-    esac
+    if [[ "$auto_version" != *"获取失败"* ]]; then
+        echo -e "\n${BLUE}请选择要安装的版本:${NC}"
+        echo -e "1. ${GREEN}稳定版 (Stable)${NC}   -> ${LATEST_STABLE_VER}"
+        echo -e "2. ${YELLOW}Alpha版${NC}  -> ${LATEST_ALPHA_VER}"
+        echo -e "3. 手动输入 (API受限时用)"
+        read -p "选项 [默认1]: " v_choice
+        case "$v_choice" in
+            2) install_version="Prerelease-Alpha" ;;
+            3) read -p "请输入版本号 (如 v1.19.0): " install_version ;;
+            *) install_version="$auto_version" ;;
+        esac
+    else
+        echo -e "${RED}无法自动获取版本 (可能触发了 GitHub API 限制)${NC}"
+        read -p "请手动输入版本号 (例如 v1.19.0): " install_version
+        if [[ -z "$install_version" ]]; then echo "取消。"; return; fi
+    fi
 
     ARCH_RAW=$(uname -m)
     case "$ARCH_RAW" in
@@ -150,33 +146,33 @@ function install_mihomo() {
         *) echo -e "${RED}不支持的架构${NC}"; return ;;
     esac
 
-    echo -e "${YELLOW}> 获取下载链接...${NC}"
-    local api_json=$(curl -s "$API_URL")
-    if [[ -z "$api_json" ]] && netstat -tunlp 2>/dev/null | grep -q ":7890 "; then
-         api_json=$(curl -s -x http://127.0.0.1:7890 "$API_URL")
+    local DOWNLOAD_URL=""
+    if [[ "$install_version" == "Prerelease-Alpha" ]]; then
+        echo -e "${YELLOW}正在解析 Alpha 下载地址...${NC}"
+        local api_json=$(curl -s "https://api.github.com/repos/MetaCubeX/mihomo/releases/tags/Prerelease-Alpha")
+        DOWNLOAD_URL=$(echo "$api_json" | grep "browser_download_url" | grep "linux-$Download_Arch" | grep ".gz\"" | head -n 1 | sed -E 's/.*"([^"]+)".*/\1/')
+        if [[ -z "$DOWNLOAD_URL" ]]; then echo -e "${RED}Alpha 解析失败，请选稳定版。${NC}"; return; fi
+    else
+        DOWNLOAD_URL="https://github.com/MetaCubeX/mihomo/releases/download/${install_version}/mihomo-linux-${Download_Arch}-${install_version}.gz"
     fi
-    local DOWNLOAD_URL=$(echo "$api_json" | grep "browser_download_url" | grep "linux-$Download_Arch" | grep ".gz\"" | head -n 1 | sed -E 's/.*"([^"]+)".*/\1/')
-    
-    if [[ -z "$DOWNLOAD_URL" ]]; then echo -e "${RED}未找到下载资源，请检查网络。${NC}"; return; fi
-    
+
     echo -e "下载地址: $DOWNLOAD_URL"
-    echo -e "${YELLOW}> 下载并安装核心...${NC}"
+    echo -e "${YELLOW}> 正在下载核心...${NC}"
     mkdir -p "$CONFIG_DIR"
-    wget -q -O "/tmp/mihomo.gz" "$DOWNLOAD_URL" || \
-    wget -q -e use_proxy=yes -e http_proxy=127.0.0.1:7890 -O "/tmp/mihomo.gz" "$DOWNLOAD_URL"
+    wget -q -O "/tmp/mihomo.gz" "$DOWNLOAD_URL"
     
-    if [[ $? -ne 0 ]]; then echo -e "${RED}下载失败或已取消${NC}"; return; fi
+    if [[ $? -ne 0 ]]; then echo -e "${RED}下载失败，请检查版本号。${NC}"; return; fi
 
     systemctl stop mihomo 2>/dev/null
     gzip -d -c /tmp/mihomo.gz > /usr/local/bin/mihomo
     chmod +x /usr/local/bin/mihomo
     rm /tmp/mihomo.gz
 
-    # 这里调用更新函数 (UI更新已移除)
+    # 更新配套资源 & UI
     update_geodb || return
-    # update_ui || return  <-- 已注释掉，安装时不下载UI
+    update_ui || return  # <--- 【恢复】安装时自动下载 UI
 
-    echo -e "${YELLOW}> 应用配置文件...${NC}"
+    echo -e "${YELLOW}> 应用配置...${NC}"
     cp "$TEMPLATE_FILE" "${CONFIG_DIR}/config.yaml"
     
     if grep -q "{{SUBSCRIPTION_URL}}" "${CONFIG_DIR}/config.yaml"; then
@@ -191,7 +187,7 @@ function install_mihomo() {
         sed -i "s|{{UI_SECRET}}|$USER_SECRET|g" "${CONFIG_DIR}/config.yaml"
     fi
 
-    echo -e "${YELLOW}> 配置系统服务...${NC}"
+    echo -e "${YELLOW}> 配置服务...${NC}"
     cat > /etc/systemd/system/mihomo.service <<EOF
 [Unit]
 Description=Mihomo Daemon
@@ -209,11 +205,60 @@ EOF
     systemctl enable mihomo
     systemctl restart mihomo
 
-    echo -e "${GREEN}=== 安装完成 (未安装UI) ===${NC}"
+    echo -e "${GREEN}=== 安装完成 ===${NC}"
     check_versions force
+    get_dashboard_info
 }
 
-# --- 功能 2: 服务管理 ---
+# --- 功能: 更新 Geo ---
+function update_geodb() {
+    echo -e "${YELLOW}更新数据库...${NC}"
+    for url in \
+        "https://github.com/MetaCubeX/meta-rules-dat/releases/download/latest/country.mmdb" \
+        "https://github.com/MetaCubeX/meta-rules-dat/releases/download/latest/geosite.dat" \
+        "https://github.com/MetaCubeX/meta-rules-dat/releases/download/latest/geoip.dat"; do
+        wget -q --show-progress -O "${CONFIG_DIR}/$(basename $url)" "$url"
+    done
+    echo -e "${GREEN}数据库更新完成。${NC}"
+    if [ -f "/etc/systemd/system/mihomo.service" ]; then systemctl restart mihomo; fi
+}
+
+# --- 功能: 更新 UI (根目录直装版) ---
+function update_ui() {
+    echo -e "${YELLOW}更新 UI (安装至 /ui 根目录)...${NC}"
+    
+    local TMP_UI_DIR="/tmp/mihomo_ui_extract"
+    # 【核心修改】目标就是 ui 根目录，不再有 zashboard 子目录
+    local TARGET_UI_DIR="${CONFIG_DIR}/ui"
+    
+    rm -rf "$TMP_UI_DIR"; mkdir -p "$TMP_UI_DIR"
+
+    wget -q -O "/tmp/z.zip" "https://github.com/Zephyruso/zashboard/archive/refs/heads/gh-pages.zip"
+    
+    if [[ $? -eq 0 ]]; then
+        unzip -q -o "/tmp/z.zip" -d "$TMP_UI_DIR"
+        local EXTRACTED_DIR=$(ls "$TMP_UI_DIR" | head -n 1)
+        
+        if [[ -n "$EXTRACTED_DIR" ]]; then
+            # 1. 彻底清空 /etc/mihomo/ui 目录，确保无残留
+            rm -rf "$TARGET_UI_DIR"
+            mkdir -p "$TARGET_UI_DIR"
+            
+            # 2. 将内容直接平铺到 /etc/mihomo/ui/
+            cp -rf "$TMP_UI_DIR/$EXTRACTED_DIR"/* "$TARGET_UI_DIR/"
+            echo -e "${GREEN}UI 更新完成。文件位置: ${TARGET_UI_DIR}/index.html${NC}"
+        else
+            echo -e "${RED}解压失败，未找到文件。${NC}"
+        fi
+        
+        rm -rf "$TMP_UI_DIR"; rm "/tmp/z.zip"
+        if [ -f "/etc/systemd/system/mihomo.service" ]; then systemctl restart mihomo; fi
+    else
+        echo -e "${RED}UI下载失败${NC}"
+    fi
+}
+
+# --- 功能: 服务管理 ---
 function service_control() {
     case "$1" in
         start) systemctl start mihomo; echo -e "${GREEN}服务已启动${NC}" ;;
@@ -223,122 +268,12 @@ function service_control() {
     esac
 }
 
-# --- 功能 3: 更新内核 ---
+# --- 功能: 更新内核 (简版) ---
 function update_core() {
-    echo -e "${BLUE}正在检测版本...${NC}"
-    check_versions force
-    
-    echo -e "\n${BLUE}请选择版本:${NC}"
-    echo -e "1. ${GREEN}稳定版${NC} -> ${LATEST_STABLE_VER}"
-    echo -e "2. ${YELLOW}Alpha版${NC}  -> ${LATEST_ALPHA_VER}"
-    echo -e "0. 取消"
-    read -p "选项: " ver_choice
-
-    local API_URL=""
-    case "$ver_choice" in
-        1) API_URL="https://api.github.com/repos/MetaCubeX/mihomo/releases/latest" ;;
-        2) API_URL="https://api.github.com/repos/MetaCubeX/mihomo/releases/tags/Prerelease-Alpha" ;;
-        *) return ;;
-    esac
-
-    ARCH_RAW=$(uname -m)
-    case "$ARCH_RAW" in
-        x86_64) Download_Arch="amd64" ;;
-        aarch64) Download_Arch="arm64" ;;
-        armv7l) Download_Arch="armv7" ;;
-        *) return ;;
-    esac
-
-    echo -e "${YELLOW}获取链接中...${NC}"
-    local api_json=$(curl -s "$API_URL")
-    if [[ -z "$api_json" ]] && netstat -tunlp 2>/dev/null | grep -q ":7890 "; then
-         api_json=$(curl -s -x http://127.0.0.1:7890 "$API_URL")
-    fi
-    local DOWNLOAD_URL=$(echo "$api_json" | grep "browser_download_url" | grep "linux-$Download_Arch" | grep ".gz\"" | head -n 1 | sed -E 's/.*"([^"]+)".*/\1/')
-    
-    if [[ -z "$DOWNLOAD_URL" ]]; then echo -e "${RED}未找到资源${NC}"; return; fi
-
-    echo -e "${YELLOW}下载中...${NC}"
-    wget -T 20 -O "/tmp/mihomo.gz" "$DOWNLOAD_URL" || \
-    wget -e use_proxy=yes -e http_proxy=127.0.0.1:7890 -T 30 -O "/tmp/mihomo.gz" "$DOWNLOAD_URL"
-    
-    if [[ $? -eq 0 ]]; then
-        systemctl stop mihomo
-        gzip -d -c /tmp/mihomo.gz > /usr/local/bin/mihomo
-        chmod +x /usr/local/bin/mihomo
-        rm /tmp/mihomo.gz
-        systemctl start mihomo
-        echo -e "${GREEN}更新成功！${NC}"
-        check_versions force
-    else
-        echo -e "${RED}下载失败${NC}"
-    fi
+    install_mihomo # 复用安装逻辑
 }
 
-# --- 功能 4: 更新 Geo ---
-function update_geodb() {
-    echo -e "${YELLOW}更新数据库...${NC}"
-    for url in \
-        "https://github.com/MetaCubeX/meta-rules-dat/releases/download/latest/country.mmdb" \
-        "https://github.com/MetaCubeX/meta-rules-dat/releases/download/latest/geosite.dat" \
-        "https://github.com/MetaCubeX/meta-rules-dat/releases/download/latest/geoip.dat"; do
-        wget -q --show-progress -O "${CONFIG_DIR}/$(basename $url)" "$url" || \
-        wget -q --show-progress -e use_proxy=yes -e http_proxy=127.0.0.1:7890 -O "${CONFIG_DIR}/$(basename $url)" "$url"
-    done
-    
-    echo -e "${GREEN}数据库更新完成。${NC}"
-    
-    if [ -f "/etc/systemd/system/mihomo.service" ]; then
-        echo -e "${YELLOW}正在重启服务...${NC}"
-        systemctl restart mihomo
-    fi
-}
-
-# --- 功能 5: 更新 UI (单独保留，供手动调用) ---
-function update_ui() {
-    echo -e "${YELLOW}更新 UI...${NC}"
-    
-    # 1. 建立临时目录
-    local TMP_UI_DIR="/tmp/mihomo_ui_extract"
-    rm -rf "$TMP_UI_DIR"
-    mkdir -p "$TMP_UI_DIR"
-
-    # 2. 下载
-    wget -q -O "/tmp/z.zip" "https://github.com/Zephyruso/zashboard/archive/refs/heads/gh-pages.zip"
-    
-    if [[ $? -eq 0 ]]; then
-        # 3. 解压到临时目录
-        unzip -q -o "/tmp/z.zip" -d "$TMP_UI_DIR"
-        
-        # 4. 找到解压后的内部文件夹
-        local EXTRACTED_DIR=$(ls "$TMP_UI_DIR" | head -n 1)
-        
-        if [[ -n "$EXTRACTED_DIR" ]]; then
-            # 5. 删除旧的 UI 目录
-            rm -rf "${CONFIG_DIR}/ui/zashboard"
-            mkdir -p "${CONFIG_DIR}/ui/zashboard"
-            
-            # 6. 移动新文件 (扁平化)
-            mv "$TMP_UI_DIR/$EXTRACTED_DIR"/* "${CONFIG_DIR}/ui/zashboard/"
-            echo -e "${GREEN}UI 更新完成。${NC}"
-        else
-            echo -e "${RED}解压失败，未找到文件。${NC}"
-        fi
-
-        # 清理
-        rm -rf "$TMP_UI_DIR"
-        rm "/tmp/z.zip"
-        
-        # 7. 重启服务
-        if [ -f "/etc/systemd/system/mihomo.service" ]; then
-             systemctl restart mihomo
-        fi
-    else
-        echo -e "${RED}下载失败${NC}"
-    fi
-}
-
-# --- 功能 6: Git 同步 ---
+# --- 功能: Git 同步 ---
 function git_pull_script() {
     if [ -d ".git" ]; then
         echo -e "${YELLOW}同步脚本...${NC}"
@@ -349,50 +284,33 @@ function git_pull_script() {
     fi
 }
 
-# --- 功能 7: 彻底卸载 (可视化版) ---
+# --- 功能: 彻底卸载 ---
 function uninstall_mihomo() {
-    echo -e "${RED}========================================${NC}"
-    echo -e "${RED}      Mihomo 彻底卸载程序 (慎用)     ${NC}"
-    echo -e "${RED}========================================${NC}"
-    echo -e "${YELLOW}⚠️  警告：此操作将永久删除以下内容：${NC}"
-    echo -e "  1. 服务文件: /etc/systemd/system/mihomo.service"
-    echo -e "  2. 核心程序: /usr/local/bin/mihomo"
-    echo -e "  3. 配置目录: /etc/mihomo/"
-    echo -e "${RED}========================================${NC}"
-    read -p "确认卸载吗？(输入 y 确认): " confirm
-
+    echo -e "${RED}=== Mihomo 彻底卸载 ===${NC}"
+    echo -e "${YELLOW}即将删除服务、程序及所有配置。${NC}"
+    read -p "确认卸载? (y/n): " confirm
     if [[ "$confirm" != "y" ]]; then return; fi
 
-    echo -e "${YELLOW}正在停止服务...${NC}"
     systemctl stop mihomo 2>/dev/null
     systemctl disable mihomo 2>/dev/null
-
-    echo -e "${YELLOW}正在清理文件...${NC}"
-
-    # 1. 服务文件
+    
     if [ -f "/etc/systemd/system/mihomo.service" ]; then
-        rm -f /etc/systemd/system/mihomo.service
-        systemctl daemon-reload
-        echo -e "${GREEN}  [OK] 已删除服务文件: /etc/systemd/system/mihomo.service${NC}"
+        rm -f /etc/systemd/system/mihomo.service; systemctl daemon-reload
+        echo -e "${GREEN}  [OK] 服务文件已删除${NC}"
     fi
-
-    # 2. 核心程序
     if [ -f "/usr/local/bin/mihomo" ]; then
         rm -f /usr/local/bin/mihomo
-        echo -e "${GREEN}  [OK] 已删除核心程序: /usr/local/bin/mihomo${NC}"
+        echo -e "${GREEN}  [OK] 核心程序已删除${NC}"
     fi
-
-    # 3. 配置目录
     if [ -d "/etc/mihomo" ]; then
         rm -rf /etc/mihomo
-        echo -e "${GREEN}  [OK] 已删除配置目录: /etc/mihomo${NC}"
+        echo -e "${GREEN}  [OK] 配置目录已删除${NC}"
     fi
     
-    echo -e "${GREEN}=== 卸载完成 ===${NC}"
     check_versions force
 }
 
-# ================= 命令行参数处理 (CLI Mode) =================
+# ================= CLI Mode =================
 if [[ -n "$1" ]]; then
     case "$1" in
         install)   install_mihomo ;;
@@ -403,15 +321,15 @@ if [[ -n "$1" ]]; then
         status)    service_control status ;;
         update)    update_core ;;
         log)       journalctl -u mihomo -f ;;
-        *)         echo -e "${RED}用法: sudo bash mihomo.sh [install|uninstall|start|stop|restart|status|update|log]${NC}" ;;
+        *)         echo -e "${RED}用法: sudo bash mihomo.sh [install|...]${NC}" ;;
     esac
     exit 0
 fi
 
-# ================= 交互式菜单 (Menu Mode) =================
+# ================= Menu Mode =================
 echo -e "${BLUE}初始化...${NC}"
 check_versions
-# get_dashboard_info # 移除这里的调用
+get_dashboard_info
 
 while true; do
     get_dashboard_info 
@@ -419,7 +337,7 @@ while true; do
     sleep 0.1
     clear
     echo -e "${BLUE}=====================================${NC}"
-    echo -e "${GREEN}      Mihomo 全能工具箱 (v3.0)       ${NC}"
+    echo -e "${GREEN}      Mihomo 全能工具箱 (v3.4)       ${NC}"
     echo -e "${BLUE}=====================================${NC}"
     echo -e "当前版本: ${YELLOW}${CURRENT_VER}${NC}"
     echo -e "最新稳定: ${LATEST_STABLE_VER}"
