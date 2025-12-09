@@ -16,8 +16,55 @@ if [[ $EUID -ne 0 ]]; then
    exit 1
 fi
 
-# --- 2. 检查基础依赖 ---
-echo -e "${YELLOW}Step 1/6: 检查系统依赖...${NC}"
+# ================================================================
+# [新增功能] 检测是否已安装，如果是则显示信息并退出
+# ================================================================
+if [ -f "/etc/systemd/system/mihomo.service" ] && [ -f "${CONFIG_DIR}/config.yaml" ]; then
+    echo -e "${YELLOW}检测到 Mihomo 服务已安装，停止运行安装脚本。${NC}"
+    echo -e "正在读取现有配置信息..."
+    
+    # 1. 尝试从配置文件提取端口 (默认 9090)
+    # 逻辑：查找 external-controller 行，提取冒号后的最后一部分，去除空格
+    CURRENT_PORT=$(grep '^external-controller:' "${CONFIG_DIR}/config.yaml" | awk -F ':' '{print $NF}' | tr -d ' "')
+    [ -z "$CURRENT_PORT" ] && CURRENT_PORT="9090" # 兜底默认值
+
+    # 2. 尝试从配置文件提取密码
+    # 逻辑：查找 secret 行，去除 'secret:', 去除引号和空格
+    CURRENT_SECRET=$(grep '^secret:' "${CONFIG_DIR}/config.yaml" | sed 's/^secret: *//;s/"//g;s/'"'"'//g' | tr -d ' ')
+    [ -z "$CURRENT_SECRET" ] && CURRENT_SECRET="<未设置或无法读取>"
+
+    # 3. 获取 IP 信息
+    LOCAL_IP=$(hostname -I | awk '{print $1}')
+    PUBLIC_IP=$(curl -s ifconfig.me) # 或者 curl -s ipinfo.io/ip
+    [ -z "$LOCAL_IP" ] && LOCAL_IP="<内网IP>"
+    [ -z "$PUBLIC_IP" ] && PUBLIC_IP="<公网IP>"
+
+    # 4. 输出信息
+    echo -e "${GREEN}=== 当前服务运行信息 ===${NC}"
+    echo -e "内网访问: http://${LOCAL_IP}:${CURRENT_PORT}/ui"
+    echo -e "外网访问: http://${PUBLIC_IP}:${CURRENT_PORT}/ui"
+    echo -e "访问密码: ${YELLOW}${CURRENT_SECRET}${NC}"
+    echo -e "配置文件: ${CONFIG_DIR}/config.yaml"
+    echo -e "常用命令: sudo systemctl status mihomo"
+    echo -e ""
+    echo -e "${YELLOW}提示: 如果您确实想要强制重装或更新内核，请先卸载 (sudo bash uninstall.sh) 或手动删除服务文件。${NC}"
+    
+    exit 0
+fi
+# ================================================================
+
+
+# --- 2. 检查 Systemd (原有逻辑) ---
+echo -e "${YELLOW}Step 1/7: 检查 Systemd 环境...${NC}"
+if ! command -v systemctl &> /dev/null; then
+    echo -e "${RED}严重错误: 未检测到 Systemd 初始化系统。${NC}"
+    exit 1
+else
+    echo -e "检测到 Systemd，继续安装..."
+fi
+
+# --- 3. 检查基础依赖 ---
+echo -e "${YELLOW}Step 2/7: 检查系统依赖...${NC}"
 DEPENDENCIES=("curl" "wget" "unzip" "gzip")
 for dep in "${DEPENDENCIES[@]}"; do
     if ! command -v $dep &> /dev/null; then
@@ -33,14 +80,14 @@ for dep in "${DEPENDENCIES[@]}"; do
     fi
 done
 
-# --- 3. 检查模板文件 ---
+# --- 4. 检查模板文件 ---
 if [[ ! -f "$TEMPLATE_FILE" ]]; then
     echo -e "${RED}错误: 未找到 config.template.yaml 文件！${NC}"
     exit 1
 fi
 
-# --- 4. 系统架构识别 ---
-echo -e "${YELLOW}Step 2/6: 检测系统架构...${NC}"
+# --- 5. 系统架构识别 ---
+echo -e "${YELLOW}Step 3/7: 检测系统架构...${NC}"
 ARCH_RAW=$(uname -m)
 case "$ARCH_RAW" in
     x86_64)    Download_Arch="amd64" ;;
@@ -53,8 +100,8 @@ case "$ARCH_RAW" in
 esac
 echo -e "架构: ${ARCH_RAW} -> ${Download_Arch}"
 
-# --- 5. 安装核心 ---
-echo -e "${YELLOW}Step 3/6: 安装 Mihomo 核心...${NC}"
+# --- 6. 安装核心 ---
+echo -e "${YELLOW}Step 4/7: 安装 Mihomo 核心...${NC}"
 mkdir -p "$CONFIG_DIR"
 LATEST_VERSION=$(curl -s https://api.github.com/repos/MetaCubeX/mihomo/releases/latest | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/')
 
@@ -73,14 +120,14 @@ gzip -d -c /tmp/mihomo.gz > /usr/local/bin/mihomo
 chmod +x /usr/local/bin/mihomo
 rm /tmp/mihomo.gz
 
-# --- 6. 下载 Geo 数据库 ---
-echo -e "${YELLOW}Step 4/6: 下载 GeoIP/GeoSite 数据库...${NC}"
+# --- 7. 下载 Geo 数据库 ---
+echo -e "${YELLOW}Step 5/7: 下载 GeoIP/GeoSite 数据库...${NC}"
 wget -q --show-progress -O "${CONFIG_DIR}/GeoLite2-Country.mmdb" "https://github.com/MetaCubeX/meta-rules-dat/releases/download/latest/country.mmdb"
 wget -q --show-progress -O "${CONFIG_DIR}/geosite.dat" "https://github.com/MetaCubeX/meta-rules-dat/releases/download/latest/geosite.dat"
 wget -q --show-progress -O "${CONFIG_DIR}/geoip.dat" "https://github.com/MetaCubeX/meta-rules-dat/releases/download/latest/geoip.dat"
 
-# --- 7. 部署 UI 面板 ---
-echo -e "${YELLOW}Step 5/6: 部署 Zashboard 面板...${NC}"
+# --- 8. 部署 UI 面板 ---
+echo -e "${YELLOW}Step 6/7: 部署 Zashboard 面板...${NC}"
 mkdir -p "${CONFIG_DIR}/ui"
 wget -q --show-progress -O "/tmp/zashboard.zip" "https://github.com/Zephyruso/zashboard/archive/refs/heads/gh-pages.zip"
 
@@ -93,44 +140,37 @@ else
     echo -e "${RED}UI 面板下载失败，跳过。${NC}"
 fi
 
-# --- 8. 交互式配置 (订阅 + 密码) ---
+# --- 9. 交互式配置 ---
 echo -e "${GREEN}========================================${NC}"
 echo -e "${GREEN}   核心组件安装完成，开始配置...       ${NC}"
 echo -e "${GREEN}========================================${NC}"
 
-# 8.1 询问订阅链接
+# 8.1 订阅
 echo -e "${YELLOW}1. 请输入您的机场订阅链接 (http/https开头):${NC}"
 read -r SUB_URL
-
 if [[ -z "$SUB_URL" ]]; then
     echo -e "${RED}警告: 未输入订阅链接，将保留默认占位符。${NC}"
 fi
-
 echo -e ""
 
-# 8.2 询问面板密码 (新增)
+# 8.2 密码
 echo -e "${YELLOW}2. 请设置面板访问密码 (Secret) [默认: 123456]:${NC}"
 read -r USER_SECRET
-
-# 如果用户直接回车，设置默认密码
 if [[ -z "$USER_SECRET" ]]; then
     USER_SECRET="123456"
     echo -e "${YELLOW}使用默认密码: 123456${NC}"
 fi
 
-# --- 9. 生成配置文件 ---
-echo -e "${YELLOW}Step 6/6: 应用配置...${NC}"
+# --- 10. 生成配置文件 ---
+echo -e "${YELLOW}Step 7/7: 应用配置...${NC}"
 cp "$TEMPLATE_FILE" "${CONFIG_DIR}/config.yaml"
 
-# 替换订阅链接
 if [[ -n "$SUB_URL" ]]; then
     sed -i "s|{{SUBSCRIPTION_URL}}|$SUB_URL|g" "${CONFIG_DIR}/config.yaml"
 fi
-
-# 替换面板密码 (新增)
 sed -i "s|{{UI_SECRET}}|$USER_SECRET|g" "${CONFIG_DIR}/config.yaml"
 
-# --- 10. Systemd 服务 ---
+# --- 11. Systemd 服务 ---
 cat > /etc/systemd/system/mihomo.service <<EOF
 [Unit]
 Description=Mihomo Daemon
@@ -146,12 +186,20 @@ User=root
 WantedBy=multi-user.target
 EOF
 
-# --- 11. 启动服务 ---
+# --- 12. 启动服务 ---
 systemctl daemon-reload
 systemctl enable mihomo
 systemctl restart mihomo
 
+# 获取 IP 用于显示
+LOCAL_IP=$(hostname -I | awk '{print $1}')
+PUBLIC_IP=$(curl -s ifconfig.me)
+[ -z "$LOCAL_IP" ] && LOCAL_IP="<内网IP>"
+[ -z "$PUBLIC_IP" ] && PUBLIC_IP="<公网IP>"
+
 echo -e "${GREEN}=== 安装全部完成 ===${NC}"
-echo -e "控制面板: http://<IP>:9090/ui"
+echo -e "内网访问: http://${LOCAL_IP}:9090/ui"
+echo -e "外网访问: http://${PUBLIC_IP}:9090/ui"
 echo -e "访问密码: ${YELLOW}${USER_SECRET}${NC}"
 echo -e "配置文件: /etc/mihomo/config.yaml"
+echo -e "常用命令: sudo systemctl status mihomo"
