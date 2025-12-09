@@ -8,6 +8,8 @@ BLUE='\033[0;34m'
 NC='\033[0m'
 CONFIG_DIR="/etc/mihomo"
 TEMPLATE_FILE="./config.template.yaml"
+# 定义硬编码的默认版本 (当API失败且用户不输入时使用)
+DEFAULT_FALLBACK_VER="v1.19.17"
 
 # 检查 Root 权限
 if [[ $EUID -ne 0 ]]; then
@@ -99,7 +101,7 @@ function get_dashboard_info() {
 
 # ================= 核心功能模块 =================
 
-# --- 功能 1: 安装/重装 Mihomo (含UI直装) ---
+# --- 功能 1: 安装/重装 Mihomo (含UI直装+智能默认值) ---
 function install_mihomo() {
     echo -e "${GREEN}=== 开始安装 Mihomo (含UI) ===${NC}"
 
@@ -121,6 +123,7 @@ function install_mihomo() {
     local auto_version=$(echo "$LATEST_STABLE_VER" | sed -r "s/\x1B\[([0-9]{1,2}(;[0-9]{1,2})?)?[mGK]//g")
     local install_version=""
 
+    # === [优化] 版本选择逻辑 ===
     if [[ "$auto_version" != *"获取失败"* ]]; then
         echo -e "\n${BLUE}请选择要安装的版本:${NC}"
         echo -e "1. ${GREEN}稳定版 (Stable)${NC}   -> ${LATEST_STABLE_VER}"
@@ -129,15 +132,21 @@ function install_mihomo() {
         read -p "选项 [默认1]: " v_choice
         case "$v_choice" in
             2) install_version="Prerelease-Alpha" ;;
-            3) read -p "请输入版本号 (如 v1.19.0): " install_version ;;
+            3) 
+               # 手动输入带默认值
+               read -p "请输入版本号 [默认: ${DEFAULT_FALLBACK_VER}]: " input_ver
+               install_version="${input_ver:-$DEFAULT_FALLBACK_VER}"
+               ;;
             *) install_version="$auto_version" ;;
         esac
     else
+        # 自动获取失败时的强制输入逻辑
         echo -e "${RED}无法自动获取版本 (可能触发了 GitHub API 限制)${NC}"
-        read -p "请手动输入版本号 (例如 v1.19.0): " install_version
-        if [[ -z "$install_version" ]]; then echo "取消。"; return; fi
+        read -p "请手动输入版本号 [默认: ${DEFAULT_FALLBACK_VER}]: " input_ver
+        install_version="${input_ver:-$DEFAULT_FALLBACK_VER}"
     fi
 
+    # === 架构识别 ===
     ARCH_RAW=$(uname -m)
     case "$ARCH_RAW" in
         x86_64) Download_Arch="amd64" ;;
@@ -146,6 +155,7 @@ function install_mihomo() {
         *) echo -e "${RED}不支持的架构${NC}"; return ;;
     esac
 
+    # === 链接构建 ===
     local DOWNLOAD_URL=""
     if [[ "$install_version" == "Prerelease-Alpha" ]]; then
         echo -e "${YELLOW}正在解析 Alpha 下载地址...${NC}"
@@ -153,6 +163,7 @@ function install_mihomo() {
         DOWNLOAD_URL=$(echo "$api_json" | grep "browser_download_url" | grep "linux-$Download_Arch" | grep ".gz\"" | head -n 1 | sed -E 's/.*"([^"]+)".*/\1/')
         if [[ -z "$DOWNLOAD_URL" ]]; then echo -e "${RED}Alpha 解析失败，请选稳定版。${NC}"; return; fi
     else
+        # 稳定版直接拼接，无论x86还是arm64都会自动适配
         DOWNLOAD_URL="https://github.com/MetaCubeX/mihomo/releases/download/${install_version}/mihomo-linux-${Download_Arch}-${install_version}.gz"
     fi
 
@@ -161,7 +172,7 @@ function install_mihomo() {
     mkdir -p "$CONFIG_DIR"
     wget -q -O "/tmp/mihomo.gz" "$DOWNLOAD_URL"
     
-    if [[ $? -ne 0 ]]; then echo -e "${RED}下载失败，请检查版本号。${NC}"; return; fi
+    if [[ $? -ne 0 ]]; then echo -e "${RED}下载失败，请检查网络或版本号。${NC}"; return; fi
 
     systemctl stop mihomo 2>/dev/null
     gzip -d -c /tmp/mihomo.gz > /usr/local/bin/mihomo
@@ -170,7 +181,7 @@ function install_mihomo() {
 
     # 更新配套资源 & UI
     update_geodb || return
-    update_ui || return  # <--- 【恢复】安装时自动下载 UI
+    update_ui || return  # 安装时自动下载 UI
 
     echo -e "${YELLOW}> 应用配置...${NC}"
     cp "$TEMPLATE_FILE" "${CONFIG_DIR}/config.yaml"
@@ -228,7 +239,6 @@ function update_ui() {
     echo -e "${YELLOW}更新 UI (安装至 /ui 根目录)...${NC}"
     
     local TMP_UI_DIR="/tmp/mihomo_ui_extract"
-    # 【核心修改】目标就是 ui 根目录，不再有 zashboard 子目录
     local TARGET_UI_DIR="${CONFIG_DIR}/ui"
     
     rm -rf "$TMP_UI_DIR"; mkdir -p "$TMP_UI_DIR"
@@ -337,7 +347,7 @@ while true; do
     sleep 0.1
     clear
     echo -e "${BLUE}=====================================${NC}"
-    echo -e "${GREEN}      Mihomo 全能工具箱 (v3.4)       ${NC}"
+    echo -e "${GREEN}      Mihomo 全能工具箱 (v3.5)       ${NC}"
     echo -e "${BLUE}=====================================${NC}"
     echo -e "当前版本: ${YELLOW}${CURRENT_VER}${NC}"
     echo -e "最新稳定: ${LATEST_STABLE_VER}"
