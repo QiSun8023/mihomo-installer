@@ -1,0 +1,297 @@
+# config.yaml
+# ... (您的其他配置内容保持不变) ...
+proxy-providers:
+  Airport1:
+    url: "{{SUBSCRIPTION_URL}}"   # <--- 这里作为占位符
+    type: http
+    interval: 86400
+    health-check:
+      enable: true
+      url: https://www.gstatic.com/generate_204
+      interval: 300
+
+# 全局配置 
+mode: rule  # rule global direct
+port: 7893
+socks-port: 7891
+redir-port: 7892
+mixed-port: 7890
+tproxy-port: 7894
+allow-lan: true
+bind-address: "*"
+ipv6: false
+unified-delay: true
+tcp-concurrent: true
+# interface-name: enp6s18
+log-level: warning
+find-process-mode: 'off'
+global-client-fingerprint: chrome
+keep-alive-idle: 600
+keep-alive-interval: 15
+profile:
+  store-selected: true
+  store-fake-ip: true
+
+# 为防止使用插件朋友遇到面板问题，我注释掉了此模块。
+# 跑裸核朋友自行删除注释即可，使用nikki仅内核的ui路径改为/etc/nikki/run/ui
+external-controller: 0.0.0.0:9090
+secret: "Sq020216@qq.com"
+external-ui: "UI/zashboard"
+external-ui-name: zashboard
+external-ui-url: "https://github.com/Zephyruso/zashboard/archive/refs/heads/gh-pages.zip"
+
+#嗅探器关闭后可能出现连接本机热点的设备无法上网的问题
+sniffer:
+  enable: true                     #是否启用 sniffer
+  force-dns-mapping: true          #对 redir-host 类型识别的流量进行强制嗅探
+  parse-pure-ip: true              #对所有未获取到域名的流量进行强制嗅探
+  override-destination: true       #是否使用嗅探结果作为实际访问，默认为 true
+  sniff:                           #需要嗅探的协议设置，仅支持 HTTP/TLS/QUIC
+    QUIC:
+      ports: [443, 8443]
+    TLS:
+      ports: [443, 8443]
+    HTTP:
+      ports: [80, 8080-8880]
+      override-destination: true   #覆盖全局override-destination设置
+  force-domain:
+    - geosite:geolocation-!cn      #强制进行嗅探的域名列表，使用域名通配
+  skip-domain:                     #跳过嗅探的域名列表，使用域名通配
+    - Mijia Cloud
+    - +.mijia.tech
+    - dlg.io.mi.com
+    - +.oray.com
+    - +.sunlogin.net
+    - geosite:cn
+
+#tun必须开启，否则将无法代理流量，如网页打开慢，电报卡连接中，
+#可以尝试更换堆栈，同一堆栈在不同设备上体验不同，自行尝试。
+#更换为非gvisor堆栈可能导致IPv6出现问题
+
+tun:
+  enable: true                  #启用 tun
+  stack: gvisor                 #tun 模式堆栈，如无使用问题，建议使用 mixed栈，默认 gvisor
+  device: Meta
+  auto-route: true              #自动设置全局路由，可以自动将全局流量路由进入 tun 网卡
+  auto-detect-interface: true   #自动选择流量出口接口，多出口网卡同时连接的设备建议手动指定出口网卡
+  strict-route: false           #启用 auto-route 时执行严格的路由规则
+  dns-hijack:                   #dns 劫持，将匹配到的连接导入内部 dns 模块
+    - any:53
+    - tcp://any:53
+  route-exclude-address-set: 
+    - 0.0.0.0/8
+    - 10.0.0.0/8
+    - 127.0.0.0/8
+    - 192.168.0.0/16
+    - '::/128'
+    - '::1/128'
+    - fc70::/10
+    - fe80::/10
+
+# DNS模块
+dns:
+  enable: true
+  listen: 0.0.0.0:1053
+  ipv6: false
+  respect-rules: true
+  enhanced-mode: fake-ip
+  fake-ip-range: 28.0.0.1/8
+  fake-ip-filter-mode: blacklist
+  fake-ip-filter:
+    - "rule-set:userDirect,cn_D"
+    - "+.msftconnecttest.com"
+    - "+.msftncsi.com"
+    - "time.*.com"
+    - "+.market.xiaomi.com"
+  default-nameserver:
+    - 223.5.5.5
+  proxy-server-nameserver:
+    - https://223.5.5.5/dns-query
+  # namesever尽量用运营商提供的DNS
+  nameserver:
+    - 223.5.5.5
+    - 119.29.29.29
+
+#-----------------------------------------------------------------------------
+pr: &pr {type: select, proxies: [🚀手动切换, 🇭🇰 香港节点, 🇹🇼 台湾节点, 🇸🇬 狮城节点, 🇯🇵 日本节点, 🇰🇷 韩国节点, 🇺🇸 美国节点]}
+url-test-template: &urlt {type: url-test, tolerance: 100, interval: 1800, lazy: false}
+#代理组
+proxy-groups:                                        # 代理组配置，定义代理选择和使用方式
+  - {name: 🚀手动切换, type: select, proxies: [🇭🇰 香港节点, 🇹🇼 台湾节点, 🇸🇬 狮城节点, 🇯🇵 日本节点, 🇰🇷 韩国节点, 🇺🇸 美国节点]} # 代理组名称为“手动切换”，带有循环符号，用户可以手动选择代理
+  - {name: 🇭🇰 香港节点, <<: *urlt, include-all: true, hidden: true, filter: "(Hong.*?Kong|\bHKT\b|\bHKBN\b|\bHGC\b|\bWTT\b|\bCMI\b|[^-]港|香港|HK|Hong Kong|🇭🇰)"}
+  - {name: 🇹🇼 台湾节点, <<: *urlt, include-all: true, hidden: true, filter: "(Taiwan|新北|彰化|\bCHT\b|台湾|台灣|[^-]台|\bHINET\b|TW|🇹🇼)"}
+  - {name: 🇸🇬 狮城节点, <<: *urlt, include-all: true, hidden: true, filter: "(Singapore|新加坡|狮城|SG|🇸🇬)"}
+  - {name: 🇯🇵 日本节点, <<: *urlt, include-all: true, hidden: true, filter: "(JP|Japan|Tokyo|Osaka|Saitama|日本|东京|櫻花雲|東京|大阪|埼玉|🇯🇵)"}    
+  - {name: 🇰🇷 韩国节点, <<: *urlt, include-all: true, hidden: true, filter: "(Korea|首尔|韩|韓|韩国|KR|🇰🇷)"}
+  - {name: 🇺🇸 美国节点, <<: *urlt, include-all: true, hidden: true, filter: "(America|United.*?States|美国|美國|波特兰|达拉斯|俄勒冈|凤凰城|费利蒙|硅谷|拉斯维加斯|洛杉矶|圣何塞|圣克拉拉|西雅图|芝加哥|United States|🇺🇸)", exclude-filter: "(Traffic|Expire|Premium|频道|订阅|ISP|流量|到期|重置|下载)"}
+  - {name: 🔭Google-Fcm, type: select, proxies: [🚀手动切换, 🇭🇰 香港节点, 🇹🇼 台湾节点, 🇸🇬 狮城节点, 🇯🇵 日本节点, DIRECT]}
+  - {name: 🌊Proxy-Overseas, <<: *pr}    
+  - {name: 🌏Proxy-Google, <<: *pr}
+  - {name: ♨️Proxy-OpenAI, <<: *pr}
+  - {name: 🍀Proxy-Chat, <<: *pr}
+  - {name: 🥏Proxy-Stream, <<: *pr}
+  - {name: 🚝Speedtest, <<: *pr} 
+  - {name: 🐟漏网之鱼, <<: *pr}       
+#-------------------------------------------------------------------
+#锚点 rule-anchor:
+ip: &ip {type: http, interval: 86400, behavior: ipcidr, format: mrs}
+domain: &domain {type: http, interval: 86400, behavior: domain, format: mrs}
+class: &class {type: http, interval: 86400, behavior: classical, format: yaml}
+#规则提供服务
+rule-providers:
+  userDirect: {<<: *class, url: "https://raw.githubusercontent.com/QiSun8023/rule-providers/refs/heads/main/yaml/userDirect.yaml"}   
+  userProxy:  {<<: *class, url: "https://raw.githubusercontent.com/QiSun8023/rule-providers/refs/heads/main/yaml/userProxy.yaml"}         #自定义代理规则
+  userReject: {<<: *class, url: "https://raw.githubusercontent.com/QiSun8023/rule-providers/refs/heads/main/yaml/userReject.yaml"}         #内置反诈规则
+  googleFCM: {<<: *class, url: "https://raw.githubusercontent.com/QiSun8023/rule-providers/refs/heads/main/yaml/googleFCM.yaml"}         #googleFCM规则  
+  ChinaDomain: {<<: *class, url: "https://raw.githubusercontent.com/QiSun8023/rule-providers/refs/heads/main/yaml/ChinaDomain.yaml"}
+  ChinaMedia: {<<: *class, url: "https://raw.githubusercontent.com/QiSun8023/rule-providers/refs/heads/main/yaml/ChinaMedia.yaml"} 
+  ChinaIp: {<<: *class, url: "https://raw.githubusercontent.com/QiSun8023/rule-providers/refs/heads/main/yaml/ChinaIp.yaml"} 
+  ChinaCompanyIp: {<<: *class, url: "https://raw.githubusercontent.com/QiSun8023/rule-providers/refs/heads/main/yaml/ChinaCompanyIp.yaml"}
+  lan: {<<: *class, url: "https://raw.githubusercontent.com/QiSun8023/rule-providers/refs/heads/main/yaml/lan.yaml"}
+  adblockmihomo: {<<: *class, url: "https://raw.githubusercontent.com/217heidai/adblockfilters/main/rules/adblockmihomo.yaml"}
+#------------流媒体------------
+  youtube_D: { <<: *domain, url: "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/youtube.mrs"}
+  netflix_D: { <<: *domain, url: "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/netflix.mrs"}
+  tiktok_D: { <<: *domain, url: "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/tiktok.mrs"}
+  disney_D: { <<: *domain, url: "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/disney.mrs"}
+  twitch_D: { <<: *domain, url: "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/twitch.mrs"}
+  netflix_IP: { <<: *ip, url: "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geoip/netflix.mrs"}
+#------------OpenAI------------
+  openai_D: { <<: *domain, url: "https://github.com/MetaCubeX/meta-rules-dat/raw/refs/heads/meta/geo/geosite/openai.mrs"}
+#------------聊天软件------------
+  telegram_D: { <<: *domain, url: "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/telegram.mrs"}
+  telegram_IP: { <<: *ip, url: "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geoip/telegram.mrs"}
+  discord_D: { <<: *domain, url: "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/discord.mrs"}
+  X_D: { <<: *domain, url: "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/x.mrs"}
+  X_IP: { <<: *ip, url: "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/x.mrs"}
+#------------常用服务------------
+  google_D: { <<: *domain, url: "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/google.mrs"}
+  github_D: { <<: *domain, url: "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/github.mrs"}
+  wikimedia_D: { <<: *domain, url: "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/wikimedia.mrs"}
+  speedtest_D: { <<: *domain, url: "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/ookla-speedtest.mrs"}
+  onedrive_D: { <<: *domain, url: "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/onedrive.mrs"}
+  microsoft_D: { <<: *domain, url: "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/microsoft.mrs"}
+  google_IP: { <<: *ip, url: "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geoip/google.mrs"}
+  geolocation-!cn: { <<: *domain, url: "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/geolocation-!cn.mrs"} 
+#------------🇨🇳服务------------
+  cn_D: { <<: *domain, url: "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/cn.mrs"}  
+  cn_IP: { <<: *ip, url: "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geoip/cn.mrs"}
+#------------私人地址------------
+#用户自定义直连/代理规则，文件在模块目录/rule-provider/
+#如有需要请参考官方文档写入
+#如果想要删除两个自定义规则，需要把上面dns配置内对自定义规则的设置删除，否则内核将无法启动
+# rule-providers 中 behavior 类型说明：
+# ------------------------------------
+# 1. domain:
+#    - 自动识别为 DOMAIN 或 DOMAIN-SUFFIX 规则
+#    - 示例: '+.google.com' 表示 DOMAIN-SUFFIX,google.com
+#            'github.com'   表示 DOMAIN,github.com
+# 2. ipcidr:
+#    - 匹配 IP 地址或网段
+#    - 示例: '8.8.8.8/32' 或 '192.168.0.0/16'
+# 3. classical:
+#    - 使用完整 Clash 规则语法（如 DOMAIN, IP-CIDR, GEOIP 等）
+#    - 示例: 'DOMAIN-SUFFIX,google.com'
+#            'IP-CIDR,192.168.0.0/16'
+#            'GEOIP,CN'
+# 注意：
+# - domain 和 ipcidr 写法更简洁，适合大部分场景
+# - classical 更灵活，适合需要更复杂匹配逻辑的场合
+#-------------------------------------------------------------------
+rules:
+# === 拒绝和广告过滤规则 ===
+  - DOMAIN-KEYWORD,adobe,DIRECT
+  - RULE-SET,userDirect,DIRECT          #自定义直连规则
+  - RULE-SET,lan,DIRECT                 #自定义本地规则
+  - RULE-SET,userProxy,🌊Proxy-Overseas   #自定义代理规则
+  - RULE-SET,googleFCM,🔭Google-Fcm       #自定义Google推送服务
+  - RULE-SET,adblockmihomo,REJECT       #去广告服务
+  - DOMAIN-SUFFIX,020216.xyz,DIRECT
+#  - RULE-SET,userReject,REJECT          #内置反诈规则
+ 
+# 流媒体服务（Youtube、Netflix、TikTok等走流媒体代理组）
+  - RULE-SET,youtube_D,🥏Proxy-Stream
+  - RULE-SET,tiktok_D,🥏Proxy-Stream 
+  - RULE-SET,netflix_D,🥏Proxy-Stream
+  - RULE-SET,disney_D,🥏Proxy-Stream 
+  - RULE-SET,twitch_D,🥏Proxy-Stream
+
+# 聊天软件（Telegram、Discord、Twitter等走聊天代理组）
+  - RULE-SET,discord_D,🍀Proxy-Chat
+  - RULE-SET,telegram_D,🍀Proxy-Chat
+  - RULE-SET,X_D,🍀Proxy-Chat
+  
+# OpenAI 域名使用专门的OpenAI代理组（比如Proxy-OpenAI）
+  - RULE-SET,openai_D,♨️Proxy-OpenAI
+  
+# === 常用服务分流 ===
+  - RULE-SET,github_D,🌏Proxy-Google
+  - RULE-SET,google_D,🌏Proxy-Google
+  - RULE-SET,onedrive_D,🌏Proxy-Google
+  - RULE-SET,wikimedia_D,🌏Proxy-Google
+  - RULE-SET,microsoft_D,🌏Proxy-Google 
+  - RULE-SET,speedtest_D,🚝Speedtest
+  
+# 国外网站  
+  - RULE-SET,geolocation-!cn,🌊Proxy-Overseas 
+
+# 国内服务
+  - RULE-SET,ChinaDomain,DIRECT
+  - RULE-SET,ChinaMedia,DIRECT
+  - RULE-SET,cn_D,DIRECT
+
+# IP规则国外
+  - RULE-SET,telegram_IP,🍀Proxy-Chat,no-resolve
+  - RULE-SET,X_IP,🍀Proxy-Chat,no-resolve
+  - RULE-SET,google_IP,🌏Proxy-Google,no-resolve
+  - RULE-SET,netflix_IP,🥏Proxy-Stream,no-resolve
+
+# IP规则国内
+  - RULE-SET,ChinaIp,DIRECT
+  - RULE-SET,ChinaCompanyIp,DIRECT
+  - RULE-SET,cn_IP,DIRECT
+
+# === 默认策略 ===
+  - MATCH,🐟漏网之鱼                                      # 匹配所有未匹配到的流量，使用漏网之鱼策略
+  
+# rules 区块说明和使用注意事项
+# -----------------------------------------
+# ❗规则按顺序匹配，命中即停止继续匹配！
+# -----------------------------------------
+# ▶ 常见规则类型（写法为：类型,参数,策略组）：
+#
+# - DOMAIN-SUFFIX,example.com,DIRECT
+#   → 匹配以 example.com 结尾的域名
+#
+# - DOMAIN,example.com,DIRECT
+#   → 精确匹配 example.com
+#
+# - DOMAIN-KEYWORD,example,DIRECT
+#   → 匹配包含 example 的域名
+#
+# - IP-CIDR,192.168.0.0/16,DIRECT
+#   → 匹配指定 IP 段
+#
+# - IP-CIDR6,::/0,DIRECT
+#   → IPv6 CIDR 规则
+#
+# - GEOIP,CN,DIRECT
+#   → 匹配中国大陆的 IP 地址（依赖 geoip 数据库）
+#
+# - MATCH,PROXY
+#   → 所有其他未命中的流量，通常应作为最后一条规则
+#
+# ▶ 规则匹配优先级建议：
+# 1. DOMAIN（精准） > DOMAIN-SUFFIX > DOMAIN-KEYWORD
+# 2. IP-CIDR 应优先于 GEOIP
+# 3. MATCH 应始终为最后一条规则兜底
+
+# ▶ 规则调试建议：
+# - 使用 Clash 面板 / logs 查看规则命中情况
+# - 添加 fallback 组结合规则更灵活处理失败代理
+# - 可使用 rule-providers 分离规则文件，便于管理和更新
+
+# ▶ 高级技巧：
+# - 组合 geosite: 和 geoip: 进行分类规则
+# - 使用规则组实现自动测速和手动选择代理
+
