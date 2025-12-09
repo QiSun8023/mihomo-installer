@@ -34,7 +34,6 @@
 **方式一：标准安装 (推荐)**
 *适用于 VPS、海外服务器或网络环境良好的设备。*
 
-```bash
 git clone --depth 1 [https://github.com/QiSun8023/mihomo-installer.git](https://github.com/QiSun8023/mihomo-installer.git) \
   && cd mihomo-installer \
   && sudo bash install.sh
