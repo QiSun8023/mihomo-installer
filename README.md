@@ -36,7 +36,7 @@
 
 ```bash
 git clone --depth 1 https://github.com/QiSun8023/mihomo-installer.git \
-  && cd clash-for-linux-install \
+  && cd mihomo-installer \
   && bash install.sh
 ```
 
