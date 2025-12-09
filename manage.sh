@@ -19,7 +19,7 @@ fi
 # ========================================================
 trap 'echo -e "\n${YELLOW}[提示] 操作已取消，返回主菜单...${NC}"; sleep 1' SIGINT
 
-# ================= 辅助函数：版本检测 (双通道) =================
+# ================= 辅助函数：版本检测 (支持显示 Hash) =================
 # 定义全局变量
 CURRENT_VER="检测中..."
 LATEST_STABLE_VER="检测中..."
@@ -32,6 +32,7 @@ function fetch_remote_version() {
     local url="$1"
     local is_alpha="$2"
     local version=""
+    local commit_sha=""
     
     # 1. 尝试直连 (5秒超时)
     local api_res=$(curl -s -m 5 "$url")
@@ -43,21 +44,33 @@ function fetch_remote_version() {
         fi
     fi
     
-    # 解析版本号 (tag_name)
+    # 3. 解析 JSON
     if [[ -n "$api_res" ]] && [[ "$api_res" != *"Not Found"* ]]; then
-        version=$(echo "$api_res" | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/')
+        # 提取 tag_name
+        version=$(echo "$api_res" | grep '"tag_name":' | head -n 1 | sed -E 's/.*"([^"]+)".*/\1/')
+        
+        # 如果是 Alpha 版本，额外提取 commit hash
+        if [[ "$is_alpha" == "1" ]]; then
+            commit_sha=$(echo "$api_res" | grep '"target_commitish":' | head -n 1 | sed -E 's/.*"([^"]+)".*/\1/' | cut -c 1-7)
+        fi
     fi
     
     if [[ -z "$version" ]]; then
         echo "${RED}获取失败${NC}"
     else
-        echo "$version"
+        if [[ -n "$commit_sha" ]]; then
+            # 如果有 hash，拼接到版本号后面，例如: Prerelease-Alpha (a1b2c3d)
+            echo "${version} (${commit_sha})"
+        else
+            echo "$version"
+        fi
     fi
 }
 
 function check_versions() {
     # 1. 获取本地版本
     if [ -f "/usr/local/bin/mihomo" ]; then
+        # 尝试提取版本号，如果本地就是 alpha，提取全名
         CURRENT_VER=$(/usr/local/bin/mihomo -v 2>/dev/null | head -n 1 | awk '{print $3}')
     else
         CURRENT_VER="${RED}未安装${NC}"
@@ -95,19 +108,19 @@ function update_core() {
     echo -e "0. 取消更新"
     read -p "请输入选项 [1-2]: " ver_choice
 
-    local TARGET_VER=""
     local API_URL=""
+    local TARGET_DISPLAY=""
     
     case "$ver_choice" in
         1)
             if [[ "$LATEST_STABLE_VER" == *"获取失败"* ]]; then echo -e "${RED}无法获取稳定版信息${NC}"; return; fi
-            TARGET_VER="$LATEST_STABLE_VER"
             API_URL="https://api.github.com/repos/MetaCubeX/mihomo/releases/latest"
+            TARGET_DISPLAY="$LATEST_STABLE_VER"
             ;;
         2)
             if [[ "$LATEST_ALPHA_VER" == *"获取失败"* ]]; then echo -e "${RED}无法获取 Alpha 版信息${NC}"; return; fi
-            TARGET_VER="$LATEST_ALPHA_VER"
             API_URL="https://api.github.com/repos/MetaCubeX/mihomo/releases/tags/Prerelease-Alpha"
+            TARGET_DISPLAY="$LATEST_ALPHA_VER"
             ;;
         *) return ;;
     esac
@@ -121,9 +134,9 @@ function update_core() {
         *)         echo -e "${RED}不支持的架构${NC}"; return ;;
     esac
 
-    echo -e "${YELLOW}正在获取下载链接 (版本: $TARGET_VER)...${NC}"
+    echo -e "${YELLOW}正在获取下载链接 [$TARGET_DISPLAY]...${NC}"
     
-    # 动态获取下载链接 (因为 Alpha 版本文件名包含随机哈希，必须动态解析)
+    # 动态获取下载链接
     # 1. 获取 JSON
     local api_json=$(curl -s "$API_URL")
     if [[ -z "$api_json" ]] && netstat -tunlp 2>/dev/null | grep -q ":7890 "; then
@@ -131,7 +144,6 @@ function update_core() {
     fi
     
     # 2. 提取对应架构的 .gz 文件 URL
-    # 逻辑：查找 browser_download_url，匹配 linux-{arch}, 排除 .sha256 等文件
     local DOWNLOAD_URL=$(echo "$api_json" | grep "browser_download_url" | grep "linux-$Download_Arch" | grep ".gz\"" | head -n 1 | sed -E 's/.*"([^"]+)".*/\1/')
     
     if [[ -z "$DOWNLOAD_URL" ]]; then
@@ -154,6 +166,7 @@ function update_core() {
         rm /tmp/mihomo.gz
         systemctl start mihomo
         echo -e "${GREEN}内核更新成功！当前版本已变更为: $(/usr/local/bin/mihomo -v | head -n1 | awk '{print $3}')${NC}"
+        # 更新完成后强制刷新一下显示
         check_versions force
     else
         echo -e "${RED}下载失败，请检查网络。${NC}"
@@ -203,7 +216,7 @@ function git_pull_script() {
 }
 
 # ================= 初始化 =================
-echo -e "${BLUE}正在初始化...${NC}"
+echo -e "${BLUE}正在初始化并检查版本...${NC}"
 check_versions
 
 # ================= 菜单逻辑 =================
