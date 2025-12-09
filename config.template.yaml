@@ -28,8 +28,8 @@ profile:
 
 external-controller: 0.0.0.0:9090
 secret: "{{UI_SECRET}}"
-external-ui: "ui/"
-external-ui-name: zashboard
+external-ui: ui/zashboard
+external-ui-name: index.html
 external-ui-url: "https://github.com/Zephyruso/zashboard/archive/refs/heads/gh-pages.zip"
 
 sniffer:
