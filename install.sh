@@ -6,7 +6,7 @@ GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 NC='\033[0m'
 CONFIG_DIR="/etc/mihomo"
-TEMPLATE_FILE="./config.template.yaml"
+TEMPLATE_FILE="./config.yaml"
 
 echo -e "${GREEN}=== Mihomo Armbian 安装助手 ===${NC}"
 
@@ -18,7 +18,7 @@ fi
 
 # 2. 检查配置文件模板是否存在
 if [[ ! -f "$TEMPLATE_FILE" ]]; then
-    echo -e "${RED}错误: 未找到 config.template.yaml 文件！${NC}"
+    echo -e "${RED}错误: 未找到 config.yaml 文件！${NC}"
     echo -e "请确保您克隆了完整的仓库，并且脚本与 yaml 文件在同一目录下。"
     exit 1
 fi
