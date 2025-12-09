@@ -19,7 +19,7 @@ fi
 # ========================================================
 trap 'echo -e "\n${YELLOW}[提示] 操作已取消，返回主菜单...${NC}"; sleep 1' SIGINT
 
-# ================= 辅助函数：版本检测 (支持显示 Hash) =================
+# ================= 辅助函数：版本检测 (文件名提取Hash版) =================
 # 定义全局变量
 CURRENT_VER="检测中..."
 LATEST_STABLE_VER="检测中..."
@@ -49,17 +49,24 @@ function fetch_remote_version() {
         # 提取 tag_name
         version=$(echo "$api_res" | grep '"tag_name":' | head -n 1 | sed -E 's/.*"([^"]+)".*/\1/')
         
-        # 如果是 Alpha 版本，额外提取 commit hash
+        # [修改点] 如果是 Alpha 版本，从文件名中提取 Hash
         if [[ "$is_alpha" == "1" ]]; then
-            commit_sha=$(echo "$api_res" | grep '"target_commitish":' | head -n 1 | sed -E 's/.*"([^"]+)".*/\1/' | cut -c 1-7)
+            # 逻辑：查找包含 mihomo-linux-amd64-alpha-xxxx.gz 的行，提取 xxxx
+            # 即使当前机器是 arm，查 amd64 的文件名也能拿到 hash，因为同一版本的 hash 是一样的
+            commit_sha=$(echo "$api_res" | grep "mihomo-linux-amd64-alpha-" | head -n 1 | sed -E 's/.*alpha-([a-z0-9]+)\.gz.*/\1/')
+            
+            # 兜底：如果上面的方法没提取到 (防止文件名格式变动)，再尝试用旧方法
+            if [[ -z "$commit_sha" ]] || [[ ${#commit_sha} -gt 10 ]]; then
+                 commit_sha=$(echo "$api_res" | grep '"target_commitish":' | head -n 1 | sed -E 's/.*"([^"]+)".*/\1/' | cut -c 1-7)
+            fi
         fi
     fi
     
     if [[ -z "$version" ]]; then
         echo "${RED}获取失败${NC}"
     else
-        if [[ -n "$commit_sha" ]]; then
-            # 如果有 hash，拼接到版本号后面，例如: Prerelease-Alpha (a1b2c3d)
+        if [[ -n "$commit_sha" ]] && [[ "$commit_sha" != "main" ]]; then
+            # 显示格式: Prerelease-Alpha (a1b2c3d)
             echo "${version} (${commit_sha})"
         else
             echo "$version"
@@ -70,7 +77,6 @@ function fetch_remote_version() {
 function check_versions() {
     # 1. 获取本地版本
     if [ -f "/usr/local/bin/mihomo" ]; then
-        # 尝试提取版本号，如果本地就是 alpha，提取全名
         CURRENT_VER=$(/usr/local/bin/mihomo -v 2>/dev/null | head -n 1 | awk '{print $3}')
     else
         CURRENT_VER="${RED}未安装${NC}"
@@ -78,9 +84,7 @@ function check_versions() {
 
     # 2. 获取远程版本 (缓存机制)
     if [[ "$LATEST_STABLE_VER" == "检测中..." ]] || [[ "$1" == "force" ]]; then
-        # 获取稳定版
         LATEST_STABLE_VER=$(fetch_remote_version "https://api.github.com/repos/MetaCubeX/mihomo/releases/latest" 0)
-        # 获取 Alpha 版 (指定 tag 为 Prerelease-Alpha)
         LATEST_ALPHA_VER=$(fetch_remote_version "https://api.github.com/repos/MetaCubeX/mihomo/releases/tags/Prerelease-Alpha" 1)
     fi
 }
@@ -137,13 +141,12 @@ function update_core() {
     echo -e "${YELLOW}正在获取下载链接 [$TARGET_DISPLAY]...${NC}"
     
     # 动态获取下载链接
-    # 1. 获取 JSON
     local api_json=$(curl -s "$API_URL")
     if [[ -z "$api_json" ]] && netstat -tunlp 2>/dev/null | grep -q ":7890 "; then
          api_json=$(curl -s -x http://127.0.0.1:7890 "$API_URL")
     fi
     
-    # 2. 提取对应架构的 .gz 文件 URL
+    # 提取对应架构的 .gz 文件 URL
     local DOWNLOAD_URL=$(echo "$api_json" | grep "browser_download_url" | grep "linux-$Download_Arch" | grep ".gz\"" | head -n 1 | sed -E 's/.*"([^"]+)".*/\1/')
     
     if [[ -z "$DOWNLOAD_URL" ]]; then
@@ -154,7 +157,7 @@ function update_core() {
     echo -e "下载地址: $DOWNLOAD_URL"
     echo -e "${YELLOW}正在下载...${NC}"
     
-    # 下载 (带重试和代理回退)
+    # 下载
     wget -T 20 -O "/tmp/mihomo.gz" "$DOWNLOAD_URL" || \
     wget -e use_proxy=yes -e http_proxy=127.0.0.1:7890 -T 30 -O "/tmp/mihomo.gz" "$DOWNLOAD_URL"
     
@@ -166,7 +169,6 @@ function update_core() {
         rm /tmp/mihomo.gz
         systemctl start mihomo
         echo -e "${GREEN}内核更新成功！当前版本已变更为: $(/usr/local/bin/mihomo -v | head -n1 | awk '{print $3}')${NC}"
-        # 更新完成后强制刷新一下显示
         check_versions force
     else
         echo -e "${RED}下载失败，请检查网络。${NC}"
@@ -216,7 +218,7 @@ function git_pull_script() {
 }
 
 # ================= 初始化 =================
-echo -e "${BLUE}正在初始化并检查版本...${NC}"
+echo -e "${BLUE}正在初始化...${NC}"
 check_versions
 
 # ================= 菜单逻辑 =================
