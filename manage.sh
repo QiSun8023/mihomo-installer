@@ -165,4 +165,75 @@ function git_pull_script() {
     echo -e "${YELLOW}正在从 GitHub 同步最新脚本...${NC}"
     if [ -d ".git" ]; then
         git fetch --all
-        git reset
+        git reset --hard origin/main
+        chmod +x *.sh
+        echo -e "${GREEN}脚本同步完成！请重新运行脚本。${NC}"
+        exit 0
+    else
+        echo -e "${RED}错误：当前目录不是 Git 仓库，无法同步。${NC}"
+    fi
+}
+
+# ================= 初始化 =================
+echo -e "${BLUE}正在初始化并检查版本...${NC}"
+check_versions
+
+# ================= 菜单逻辑 =================
+
+while true; do
+    sleep 0.1
+    clear
+    echo -e "${BLUE}=====================================${NC}"
+    echo -e "${GREEN}    Mihomo 管理脚本 (Manage Menu)    ${NC}"
+    echo -e "${BLUE}=====================================${NC}"
+    
+    # === 版本显示区域 ===
+    echo -e "当前内核: ${YELLOW}${CURRENT_VER}${NC}"
+    
+    # 修复了显示逻辑：只有当获取成功且版本不一致时才提示更新
+    if [[ "$LATEST_VER" != "检测中..." ]] && [[ "$LATEST_VER" != *"获取失败"* ]]; then
+        if [[ "$LATEST_VER" != "$CURRENT_VER" ]] && [[ "$CURRENT_VER" != *"未安装"* ]]; then
+             echo -e "最新内核: ${GREEN}${LATEST_VER} (可更新)${NC}"
+        else
+             echo -e "最新内核: ${LATEST_VER} (已最新)"
+        fi
+    else
+         # 如果获取失败，直接显示红色错误信息
+         echo -e "最新内核: ${LATEST_VER}"
+    fi
+    echo -e "${BLUE}=====================================${NC}"
+
+    echo -e "1. 启动服务 (Start)"
+    echo -e "2. 停止服务 (Stop)"
+    echo -e "3. 重启服务 (Restart)"
+    echo -e "4. 查看运行状态 (Status)"
+    echo -e "-------------------------------------"
+    echo -e "5. 更新 Mihomo 内核 (Update Core)"
+    echo -e "6. 更新 Geo 数据库 (Update GeoDB)"
+    echo -e "7. 更新 UI 面板 (Update UI)"
+    echo -e "-------------------------------------"
+    echo -e "8. 查看配置文件 (View Config)"
+    echo -e "9. 查看实时日志 (View Log) [按 Ctrl+C 退出]"
+    echo -e "0. 同步更新本脚本 (Git Pull)"
+    echo -e "q. 退出 (Quit)"
+    echo -e "${BLUE}=====================================${NC}"
+    read -p "请输入选项: " choice
+
+    case "$choice" in
+        1) service_control start ;;
+        2) service_control stop ;;
+        3) service_control restart ;;
+        4) service_control status; read -p "按回车键继续..." ;;
+        5) update_core; read -p "按回车键继续..." ;;
+        6) update_geodb; read -p "按回车键继续..." ;;
+        7) update_ui; read -p "按回车键继续..." ;;
+        8) nano /etc/mihomo/config.yaml ;;
+        9) 
+           echo -e "${YELLOW}正在打开日志... (按 Ctrl+C 返回菜单)${NC}"
+           journalctl -u mihomo -f 
+           ;;
+        0) git_pull_script ;;
+        q) exit 0 ;;
+        *) echo -e "${RED}无效选项${NC}"; sleep 1 ;;
+    esac
+done
