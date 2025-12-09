@@ -44,7 +44,7 @@ git clone --depth 1 https://github.com/QiSun8023/mihomo-installer.git \
 *如果您的服务器位于国内，或无法连接 GitHub，请使用此镜像加速命令*
 
 ```bash
-git clone --depth 1 [https://gh-proxy.com/https://github.com/QiSun8023/mihomo-installer.git](https://gh-proxy.com/https://github.com/QiSun8023/mihomo-installer.git) \
+git clone --depth 1 https://gh-proxy.com/https://github.com/QiSun8023/mihomo-installer.git \
   && cd mihomo-installer \
   && sudo bash install.sh
 ```
