@@ -74,9 +74,35 @@ function check_versions() {
     fi
 }
 
+# ================= 辅助函数：获取面板信息 (新增) =================
+SHOW_PORT="9090"
+SHOW_SECRET="<未设置>"
+SHOW_LOCAL_IP="..."
+SHOW_PUBLIC_IP="..."
+
+function get_dashboard_info() {
+    # 1. 读取配置
+    if [ -f "${CONFIG_DIR}/config.yaml" ]; then
+        SHOW_PORT=$(grep '^external-controller:' "${CONFIG_DIR}/config.yaml" | awk -F ':' '{print $NF}' | tr -d ' "')
+        [ -z "$SHOW_PORT" ] && SHOW_PORT="9090"
+        
+        SHOW_SECRET=$(grep '^secret:' "${CONFIG_DIR}/config.yaml" | sed 's/^secret: *//;s/"//g;s/'"'"'//g' | tr -d ' ')
+        [ -z "$SHOW_SECRET" ] && SHOW_SECRET="<无密码>"
+    else
+        SHOW_SECRET="${RED}未安装配置文件${NC}"
+    fi
+
+    # 2. 获取 IP (超时设为2秒，防止卡顿)
+    SHOW_LOCAL_IP=$(hostname -I | awk '{print $1}')
+    [ -z "$SHOW_LOCAL_IP" ] && SHOW_LOCAL_IP="127.0.0.1"
+    
+    SHOW_PUBLIC_IP=$(curl -s --connect-timeout 2 ifconfig.me)
+    [ -z "$SHOW_PUBLIC_IP" ] && SHOW_PUBLIC_IP="${RED}获取超时${NC}"
+}
+
 # ================= 核心功能模块 =================
 
-# --- 功能 1: 安装/重装 Mihomo (整合自 install.sh) ---
+# --- 功能 1: 安装/重装 Mihomo ---
 function install_mihomo() {
     echo -e "${GREEN}=== 开始安装 Mihomo ===${NC}"
 
@@ -95,18 +121,20 @@ function install_mihomo() {
     for dep in curl wget unzip gzip; do
         if ! command -v $dep &> /dev/null; then
             echo "正在安装 $dep..."
-            if command -v apt &> /dev/null; then apt update && apt install -y $dep
-            elif command -v yum &> /dev/null; then yum install -y $dep
-            else echo -e "${RED}无法安装 $dep${NC}"; return; fi
+            if command -v apt &> /dev/null; then 
+                apt update && apt install -y $dep || return
+            elif command -v yum &> /dev/null; then 
+                yum install -y $dep || return
+            else 
+                echo -e "${RED}无法安装 $dep${NC}"; return
+            fi
         fi
     done
 
-    # 4. 下载核心 (默认安装最新稳定版)
+    # 4. 下载核心
     echo -e "${YELLOW}> 获取最新内核版本...${NC}"
-    # 使用 fetch_remote_version 获取纯净版本号
     local ver_info=$(fetch_remote_version "https://api.github.com/repos/MetaCubeX/mihomo/releases/latest" 0)
     if [[ "$ver_info" == *"获取失败"* ]]; then echo -e "${RED}版本获取失败${NC}"; return; fi
-    # 去除可能存在的颜色代码
     local version=$(echo "$ver_info" | sed -r "s/\x1B\[([0-9]{1,2}(;[0-9]{1,2})?)?[mGK]//g") 
     
     echo -e "目标版本: $version"
@@ -126,22 +154,21 @@ function install_mihomo() {
     wget -q -O "/tmp/mihomo.gz" "$DOWNLOAD_URL" || \
     wget -q -e use_proxy=yes -e http_proxy=127.0.0.1:7890 -O "/tmp/mihomo.gz" "$DOWNLOAD_URL"
     
-    if [[ $? -ne 0 ]]; then echo -e "${RED}下载失败${NC}"; return; fi
+    if [[ $? -ne 0 ]]; then echo -e "${RED}下载失败或已取消${NC}"; return; fi
 
     systemctl stop mihomo 2>/dev/null
     gzip -d -c /tmp/mihomo.gz > /usr/local/bin/mihomo
     chmod +x /usr/local/bin/mihomo
     rm /tmp/mihomo.gz
 
-    # 5. 下载数据库 & UI (复用现有函数)
-    update_geodb
-    update_ui
+    # 5. 下载数据库 & UI
+    update_geodb || return
+    update_ui || return
 
     # 6. 生成配置
     echo -e "${YELLOW}> 应用配置文件...${NC}"
     cp "$TEMPLATE_FILE" "${CONFIG_DIR}/config.yaml"
     
-    # 智能询问
     if grep -q "{{SUBSCRIPTION_URL}}" "${CONFIG_DIR}/config.yaml"; then
         echo -e "${YELLOW}请输入机场订阅链接:${NC}"
         read -r SUB_URL
@@ -174,10 +201,8 @@ EOF
     systemctl restart mihomo
 
     echo -e "${GREEN}=== 安装完成 ===${NC}"
-    echo -e "请使用菜单选项 '4' 或 '8' 查看状态和配置。"
-    
-    # 刷新版本信息
     check_versions force
+    get_dashboard_info # 刷新信息
 }
 
 # --- 功能 2: 服务管理 ---
@@ -282,17 +307,36 @@ function git_pull_script() {
     fi
 }
 
+# --- 功能 7: 彻底卸载 ---
+function uninstall_mihomo() {
+    echo -e "${RED}=== Mihomo 彻底卸载程序 ===${NC}"
+    read -p "确定要继续吗？(y/n): " confirm
+    if [[ "$confirm" != "y" ]]; then return; fi
+
+    echo -e "${YELLOW}正在清理...${NC}"
+    systemctl stop mihomo 2>/dev/null
+    systemctl disable mihomo 2>/dev/null
+    rm -f /etc/systemd/system/mihomo.service
+    systemctl daemon-reload
+    rm -f /usr/local/bin/mihomo
+    rm -rf /etc/mihomo
+    echo -e "${GREEN}卸载完成。${NC}"
+    check_versions force
+    get_dashboard_info
+}
+
 # ================= 命令行参数处理 (CLI Mode) =================
 if [[ -n "$1" ]]; then
     case "$1" in
-        install) install_mihomo ;;
-        start)   service_control start ;;
-        stop)    service_control stop ;;
-        restart) service_control restart ;;
-        status)  service_control status ;;
-        update)  update_core ;;
-        log)     journalctl -u mihomo -f ;;
-        *)       echo -e "${RED}用法: sudo bash mihomo.sh [install|start|stop|restart|status|update|log]${NC}" ;;
+        install)   install_mihomo ;;
+        uninstall) uninstall_mihomo ;;
+        start)     service_control start ;;
+        stop)      service_control stop ;;
+        restart)   service_control restart ;;
+        status)    service_control status ;;
+        update)    update_core ;;
+        log)       journalctl -u mihomo -f ;;
+        *)         echo -e "${RED}用法: sudo bash mihomo.sh [install|uninstall|start|stop|restart|status|update|log]${NC}" ;;
     esac
     exit 0
 fi
@@ -300,27 +344,33 @@ fi
 # ================= 交互式菜单 (Menu Mode) =================
 echo -e "${BLUE}初始化...${NC}"
 check_versions
+get_dashboard_info # 获取面板信息
 
 while true; do
     sleep 0.1
     clear
     echo -e "${BLUE}=====================================${NC}"
-    echo -e "${GREEN}      Mihomo 全能工具箱 (v2.0)       ${NC}"
+    echo -e "${GREEN}      Mihomo 全能工具箱 (v2.2)       ${NC}"
     echo -e "${BLUE}=====================================${NC}"
     echo -e "当前版本: ${YELLOW}${CURRENT_VER}${NC}"
     echo -e "最新稳定: ${LATEST_STABLE_VER}"
     echo -e "最新Alpha: ${LATEST_ALPHA_VER}"
     echo -e "${BLUE}-------------------------------------${NC}"
+    echo -e "内网访问: http://${SHOW_LOCAL_IP}:${SHOW_PORT}/ui"
+    echo -e "外网访问: http://${SHOW_PUBLIC_IP}:${SHOW_PORT}/ui"
+    echo -e "访问密码: ${YELLOW}${SHOW_SECRET}${NC}"
+    echo -e "配置文件: ${CONFIG_DIR}/config.yaml"
+    echo -e "${BLUE}=====================================${NC}"
     echo -e "1. 启动服务      2. 停止服务"
     echo -e "3. 重启服务      4. 查看状态"
     echo -e "${BLUE}-------------------------------------${NC}"
     echo -e "5. 更新内核      6. 更新数据库"
-    echo -e "7. 更新 UI       ${GREEN}8. 全新安装/重装${NC}"
+    echo -e "7. 更新 UI       ${GREEN}8. 安装/重装${NC}"
     echo -e "${BLUE}-------------------------------------${NC}"
     echo -e "9. 查看配置      L. 实时日志"
-    echo -e "0. 同步脚本      q. 退出"
+    echo -e "0. 同步脚本      ${RED}U. 彻底卸载${NC}"
     echo -e "${BLUE}=====================================${NC}"
-    read -p "请选择: " choice
+    read -p "请选择 [q退出]: " choice
 
     case "$choice" in
         1) service_control start ;;
@@ -334,6 +384,7 @@ while true; do
         9) nano /etc/mihomo/config.yaml ;;
         L|l) journalctl -u mihomo -f ;;
         0) git_pull_script ;;
+        U|u) uninstall_mihomo; read -p "按回车..." ;;
         q) exit 0 ;;
         *) echo -e "无效"; sleep 0.5 ;;
     esac
