@@ -211,7 +211,6 @@ EOF
 
     echo -e "${GREEN}=== 安装完成 ===${NC}"
     check_versions force
-    get_dashboard_info
 }
 
 # --- 功能 2: 服务管理 ---
@@ -276,7 +275,7 @@ function update_core() {
     fi
 }
 
-# --- 功能 4: 更新 Geo [修复版：检测服务是否存在] ---
+# --- 功能 4: 更新 Geo ---
 function update_geodb() {
     echo -e "${YELLOW}更新数据库...${NC}"
     for url in \
@@ -289,15 +288,13 @@ function update_geodb() {
     
     echo -e "${GREEN}数据库更新完成。${NC}"
     
-    # [核心修复] 只有当服务文件存在时，才尝试重启
-    # 防止在全新安装过程中，服务文件还没创建就重启导致报错
     if [ -f "/etc/systemd/system/mihomo.service" ]; then
         echo -e "${YELLOW}正在重启服务...${NC}"
         systemctl restart mihomo
     fi
 }
 
-# --- 功能 5: 更新 UI [修复版：检测服务是否存在] ---
+# --- 功能 5: 更新 UI ---
 function update_ui() {
     echo -e "${YELLOW}更新 UI...${NC}"
     wget -q -O "/tmp/z.zip" "https://github.com/Zephyruso/zashboard/archive/refs/heads/gh-pages.zip"
@@ -308,7 +305,6 @@ function update_ui() {
         rm "/tmp/z.zip"
         echo -e "${GREEN}UI 更新完成。${NC}"
         
-        # [核心修复] 同上，防止安装过程报错
         if [ -f "/etc/systemd/system/mihomo.service" ]; then
              systemctl restart mihomo
         fi
@@ -328,31 +324,47 @@ function git_pull_script() {
     fi
 }
 
-# --- 功能 7: 彻底卸载 ---
+# --- 功能 7: 彻底卸载 (可视化版) ---
 function uninstall_mihomo() {
     echo -e "${RED}========================================${NC}"
     echo -e "${RED}      Mihomo 彻底卸载程序 (慎用)     ${NC}"
     echo -e "${RED}========================================${NC}"
-    echo -e "${YELLOW}⚠️  警告：此操作将永久删除以下文件：${NC}"
-    echo -e "  1. 服务文件: ${RED}/etc/systemd/system/mihomo.service${NC}"
-    echo -e "  2. 核心程序: ${RED}/usr/local/bin/mihomo${NC}"
-    echo -e "  3. 配置目录: ${RED}/etc/mihomo/${NC} (含配置文件、节点订阅、数据库)"
+    echo -e "${YELLOW}⚠️  警告：此操作将永久删除以下内容：${NC}"
+    echo -e "  1. 服务文件: /etc/systemd/system/mihomo.service"
+    echo -e "  2. 核心程序: /usr/local/bin/mihomo"
+    echo -e "  3. 配置目录: /etc/mihomo/"
     echo -e "${RED}========================================${NC}"
     read -p "确认卸载吗？(输入 y 确认): " confirm
 
     if [[ "$confirm" != "y" ]]; then return; fi
 
-    echo -e "${YELLOW}正在清理...${NC}"
+    echo -e "${YELLOW}正在停止服务...${NC}"
     systemctl stop mihomo 2>/dev/null
     systemctl disable mihomo 2>/dev/null
-    rm -f /etc/systemd/system/mihomo.service
-    systemctl daemon-reload
-    rm -f /usr/local/bin/mihomo
-    rm -rf /etc/mihomo
+
+    echo -e "${YELLOW}正在清理文件...${NC}"
+
+    # 1. 服务文件
+    if [ -f "/etc/systemd/system/mihomo.service" ]; then
+        rm -f /etc/systemd/system/mihomo.service
+        systemctl daemon-reload
+        echo -e "${GREEN}  [OK] 已删除服务文件: /etc/systemd/system/mihomo.service${NC}"
+    fi
+
+    # 2. 核心程序
+    if [ -f "/usr/local/bin/mihomo" ]; then
+        rm -f /usr/local/bin/mihomo
+        echo -e "${GREEN}  [OK] 已删除核心程序: /usr/local/bin/mihomo${NC}"
+    fi
+
+    # 3. 配置目录
+    if [ -d "/etc/mihomo" ]; then
+        rm -rf /etc/mihomo
+        echo -e "${GREEN}  [OK] 已删除配置目录: /etc/mihomo${NC}"
+    fi
     
-    echo -e "${GREEN}Mihomo 已卸载。${NC}"
+    echo -e "${GREEN}=== 卸载完成 ===${NC}"
     check_versions force
-    get_dashboard_info
 }
 
 # ================= 命令行参数处理 (CLI Mode) =================
@@ -374,13 +386,15 @@ fi
 # ================= 交互式菜单 (Menu Mode) =================
 echo -e "${BLUE}初始化...${NC}"
 check_versions
-get_dashboard_info
+# get_dashboard_info # 移除这里的调用
 
 while true; do
+    get_dashboard_info 
+    
     sleep 0.1
     clear
     echo -e "${BLUE}=====================================${NC}"
-    echo -e "${GREEN}      Mihomo 全能工具箱 (v2.6)       ${NC}"
+    echo -e "${GREEN}      Mihomo 全能工具箱 (v2.8)       ${NC}"
     echo -e "${BLUE}=====================================${NC}"
     echo -e "当前版本: ${YELLOW}${CURRENT_VER}${NC}"
     echo -e "最新稳定: ${LATEST_STABLE_VER}"
@@ -406,6 +420,7 @@ while true; do
     echo -e "9. 查看配置      L. 实时日志"
     echo -e "0. 同步脚本      ${RED}U. 彻底卸载${NC}"
     echo -e "${BLUE}=====================================${NC}"
+    echo -e "${YELLOW}提示: 按回车键可刷新状态信息${NC}"
     read -p "请选择 [q退出]: " choice
 
     case "$choice" in
@@ -422,6 +437,6 @@ while true; do
         0) git_pull_script ;;
         U|u) uninstall_mihomo; read -p "按回车..." ;;
         q) exit 0 ;;
-        *) echo -e "无效"; sleep 0.5 ;;
+        *) echo -e "刷新中...";;
     esac
 done
