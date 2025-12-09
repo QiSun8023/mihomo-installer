@@ -10,7 +10,7 @@
     * 下载最新版 Mihomo 内核。
     * 下载最新的 `GeoIP` 和 `GeoSite` 数据库。
     * 下载并部署 `Zashboard` 控制面板。
-* **分离式配置**：使用本地 `config.yaml` 作为模板，方便定制默认规则。
+* **分离式配置**：使用本地 `config.template.yaml` 作为模板，方便定制默认规则。
 * **交互式配置**：安装流程结束后，自动询问并注入您的机场订阅链接。
 * **Systemd 集成**：自动创建服务文件，支持开机自启和后台运行。
 
@@ -18,7 +18,7 @@
 
 ```text
 .
-├── config.yaml   # 配置文件模板 (可按需修改规则)
+├── config.template.yaml   # 配置文件模板 (可按需修改规则)
 ├── install.sh             # 一键安装脚本
 ├── uninstall.sh           # 一键卸载脚本
 └── README.md              # 说明文档
