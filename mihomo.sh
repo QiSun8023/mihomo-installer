@@ -107,9 +107,9 @@ function get_dashboard_info() {
 
 # ================= 核心功能模块 =================
 
-# --- 功能 1: 安装/重装 Mihomo ---
+# --- 功能 1: 安装/重装 Mihomo (无UI版) ---
 function install_mihomo() {
-    echo -e "${GREEN}=== 开始安装 Mihomo ===${NC}"
+    echo -e "${GREEN}=== 开始安装 Mihomo (无UI模式) ===${NC}"
 
     if ! command -v systemctl &> /dev/null; then
         echo -e "${RED}错误: 未检测到 Systemd，无法安装。${NC}"; return
@@ -172,9 +172,9 @@ function install_mihomo() {
     chmod +x /usr/local/bin/mihomo
     rm /tmp/mihomo.gz
 
-    # 这里调用更新函数
+    # 这里调用更新函数 (UI更新已移除)
     update_geodb || return
-    update_ui || return
+    # update_ui || return  <-- 已注释掉，安装时不下载UI
 
     echo -e "${YELLOW}> 应用配置文件...${NC}"
     cp "$TEMPLATE_FILE" "${CONFIG_DIR}/config.yaml"
@@ -209,7 +209,7 @@ EOF
     systemctl enable mihomo
     systemctl restart mihomo
 
-    echo -e "${GREEN}=== 安装完成 ===${NC}"
+    echo -e "${GREEN}=== 安装完成 (未安装UI) ===${NC}"
     check_versions force
 }
 
@@ -294,22 +294,47 @@ function update_geodb() {
     fi
 }
 
-# --- 功能 5: 更新 UI ---
+# --- 功能 5: 更新 UI (单独保留，供手动调用) ---
 function update_ui() {
     echo -e "${YELLOW}更新 UI...${NC}"
+    
+    # 1. 建立临时目录
+    local TMP_UI_DIR="/tmp/mihomo_ui_extract"
+    rm -rf "$TMP_UI_DIR"
+    mkdir -p "$TMP_UI_DIR"
+
+    # 2. 下载
     wget -q -O "/tmp/z.zip" "https://github.com/Zephyruso/zashboard/archive/refs/heads/gh-pages.zip"
+    
     if [[ $? -eq 0 ]]; then
-        unzip -q -o "/tmp/z.zip" -d "/tmp/"
-        rm -rf "${CONFIG_DIR}/ui/zashboard"
-        mv "/tmp/zashboard-gh-pages" "${CONFIG_DIR}/ui/zashboard"
-        rm "/tmp/z.zip"
-        echo -e "${GREEN}UI 更新完成。${NC}"
+        # 3. 解压到临时目录
+        unzip -q -o "/tmp/z.zip" -d "$TMP_UI_DIR"
         
+        # 4. 找到解压后的内部文件夹
+        local EXTRACTED_DIR=$(ls "$TMP_UI_DIR" | head -n 1)
+        
+        if [[ -n "$EXTRACTED_DIR" ]]; then
+            # 5. 删除旧的 UI 目录
+            rm -rf "${CONFIG_DIR}/ui/zashboard"
+            mkdir -p "${CONFIG_DIR}/ui/zashboard"
+            
+            # 6. 移动新文件 (扁平化)
+            mv "$TMP_UI_DIR/$EXTRACTED_DIR"/* "${CONFIG_DIR}/ui/zashboard/"
+            echo -e "${GREEN}UI 更新完成。${NC}"
+        else
+            echo -e "${RED}解压失败，未找到文件。${NC}"
+        fi
+
+        # 清理
+        rm -rf "$TMP_UI_DIR"
+        rm "/tmp/z.zip"
+        
+        # 7. 重启服务
         if [ -f "/etc/systemd/system/mihomo.service" ]; then
              systemctl restart mihomo
         fi
     else
-        echo -e "${RED}失败${NC}"
+        echo -e "${RED}下载失败${NC}"
     fi
 }
 
@@ -394,7 +419,7 @@ while true; do
     sleep 0.1
     clear
     echo -e "${BLUE}=====================================${NC}"
-    echo -e "${GREEN}      Mihomo 全能工具箱 (v2.8)       ${NC}"
+    echo -e "${GREEN}      Mihomo 全能工具箱 (v3.0)       ${NC}"
     echo -e "${BLUE}=====================================${NC}"
     echo -e "当前版本: ${YELLOW}${CURRENT_VER}${NC}"
     echo -e "最新稳定: ${LATEST_STABLE_VER}"
