@@ -19,10 +19,41 @@ fi
 # ========================================================
 trap 'echo -e "\n${YELLOW}[提示] 操作已取消，返回主菜单...${NC}"; sleep 1' SIGINT
 
-# ================= 辅助函数：版本检测 (增强版) =================
+# ================= 辅助函数：版本检测 (双通道) =================
 # 定义全局变量
 CURRENT_VER="检测中..."
-LATEST_VER="检测中..."
+LATEST_STABLE_VER="检测中..."
+LATEST_ALPHA_VER="检测中..."
+
+# 获取远程版本的通用函数
+# 参数 $1: API URL
+# 参数 $2: 是否为 Alpha (1=是, 0=否)
+function fetch_remote_version() {
+    local url="$1"
+    local is_alpha="$2"
+    local version=""
+    
+    # 1. 尝试直连 (5秒超时)
+    local api_res=$(curl -s -m 5 "$url")
+    
+    # 2. 如果失败且本地有代理，尝试走代理
+    if [[ -z "$api_res" ]] || [[ "$api_res" == *"API rate limit"* ]]; then
+        if netstat -tunlp 2>/dev/null | grep -q ":7890 "; then
+            api_res=$(curl -s -m 10 -x http://127.0.0.1:7890 "$url")
+        fi
+    fi
+    
+    # 解析版本号 (tag_name)
+    if [[ -n "$api_res" ]] && [[ "$api_res" != *"Not Found"* ]]; then
+        version=$(echo "$api_res" | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/')
+    fi
+    
+    if [[ -z "$version" ]]; then
+        echo "${RED}获取失败${NC}"
+    else
+        echo "$version"
+    fi
+}
 
 function check_versions() {
     # 1. 获取本地版本
@@ -32,25 +63,12 @@ function check_versions() {
         CURRENT_VER="${RED}未安装${NC}"
     fi
 
-    # 2. 获取远程版本 (只在脚本启动时或更新后获取)
-    if [[ "$LATEST_VER" == "检测中..." ]] || [[ "$1" == "force" ]]; then
-        # 步骤 A: 尝试直连 (延长到 5秒)
-        local api_res=$(curl -s -m 5 https://api.github.com/repos/MetaCubeX/mihomo/releases/latest | grep '"tag_name":')
-        
-        # 步骤 B: 如果直连失败，且本地 7890 端口通畅，尝试走代理检测
-        if [ -z "$api_res" ]; then
-            # 简单检测端口占用，判断代理是否开启
-            if netstat -tunlp 2>/dev/null | grep -q ":7890 "; then
-                # echo "尝试通过代理获取..." # 调试用
-                api_res=$(curl -s -m 10 -x http://127.0.0.1:7890 https://api.github.com/repos/MetaCubeX/mihomo/releases/latest | grep '"tag_name":')
-            fi
-        fi
-
-        if [ -n "$api_res" ]; then
-            LATEST_VER=$(echo "$api_res" | sed -E 's/.*"([^"]+)".*/\1/')
-        else
-            LATEST_VER="${RED}获取失败(网络超时)${NC}"
-        fi
+    # 2. 获取远程版本 (缓存机制)
+    if [[ "$LATEST_STABLE_VER" == "检测中..." ]] || [[ "$1" == "force" ]]; then
+        # 获取稳定版
+        LATEST_STABLE_VER=$(fetch_remote_version "https://api.github.com/repos/MetaCubeX/mihomo/releases/latest" 0)
+        # 获取 Alpha 版 (指定 tag 为 Prerelease-Alpha)
+        LATEST_ALPHA_VER=$(fetch_remote_version "https://api.github.com/repos/MetaCubeX/mihomo/releases/tags/Prerelease-Alpha" 1)
     fi
 }
 
@@ -59,41 +77,42 @@ function check_versions() {
 # 1. 服务管理功能
 function service_control() {
     case "$1" in
-        start)
-            systemctl start mihomo
-            echo -e "${GREEN}服务已启动${NC}"
-            ;;
-        stop)
-            systemctl stop mihomo
-            echo -e "${YELLOW}服务已停止${NC}"
-            ;;
-        restart)
-            systemctl restart mihomo
-            echo -e "${GREEN}服务已重启${NC}"
-            ;;
-        status)
-            systemctl status mihomo -l --no-pager
-            ;;
+        start) systemctl start mihomo; echo -e "${GREEN}服务已启动${NC}" ;;
+        stop) systemctl stop mihomo; echo -e "${YELLOW}服务已停止${NC}" ;;
+        restart) systemctl restart mihomo; echo -e "${GREEN}服务已重启${NC}" ;;
+        status) systemctl status mihomo -l --no-pager ;;
     esac
 }
 
-# 2. 更新 Mihomo 内核
+# 2. 更新 Mihomo 内核 (支持选择版本)
 function update_core() {
-    echo -e "${BLUE}正在检测最新版本...${NC}"
-    
+    echo -e "${BLUE}正在检测最新版本信息...${NC}"
     check_versions force
+
+    echo -e "\n${BLUE}请选择要更新的版本:${NC}"
+    echo -e "1. ${GREEN}稳定版 (Stable)${NC}   -> ${LATEST_STABLE_VER}"
+    echo -e "2. ${YELLOW}开发版 (Alpha)${NC}    -> ${LATEST_ALPHA_VER}"
+    echo -e "0. 取消更新"
+    read -p "请输入选项 [1-2]: " ver_choice
+
+    local TARGET_VER=""
+    local API_URL=""
     
-    if [[ "$LATEST_VER" == *"获取失败"* ]]; then
-        echo -e "${RED}无法获取最新版本信息，请检查网络或确保服务已启动。${NC}"
-        return
-    fi
+    case "$ver_choice" in
+        1)
+            if [[ "$LATEST_STABLE_VER" == *"获取失败"* ]]; then echo -e "${RED}无法获取稳定版信息${NC}"; return; fi
+            TARGET_VER="$LATEST_STABLE_VER"
+            API_URL="https://api.github.com/repos/MetaCubeX/mihomo/releases/latest"
+            ;;
+        2)
+            if [[ "$LATEST_ALPHA_VER" == *"获取失败"* ]]; then echo -e "${RED}无法获取 Alpha 版信息${NC}"; return; fi
+            TARGET_VER="$LATEST_ALPHA_VER"
+            API_URL="https://api.github.com/repos/MetaCubeX/mihomo/releases/tags/Prerelease-Alpha"
+            ;;
+        *) return ;;
+    esac
 
-    if [[ "$CURRENT_VER" == "$LATEST_VER" ]]; then
-        echo -e "${GREEN}当前已是最新版本 ($CURRENT_VER)，无需更新。${NC}"
-        read -p "是否强制重新安装? (y/n): " force_install
-        if [[ "$force_install" != "y" ]]; then return; fi
-    fi
-
+    # 架构识别
     ARCH_RAW=$(uname -m)
     case "$ARCH_RAW" in
         x86_64)    Download_Arch="amd64" ;;
@@ -102,21 +121,39 @@ function update_core() {
         *)         echo -e "${RED}不支持的架构${NC}"; return ;;
     esac
 
-    echo -e "目标版本: ${LATEST_VER}"
-    DOWNLOAD_URL="https://github.com/MetaCubeX/mihomo/releases/download/${LATEST_VER}/mihomo-linux-${Download_Arch}-${LATEST_VER}.gz"
+    echo -e "${YELLOW}正在获取下载链接 (版本: $TARGET_VER)...${NC}"
     
+    # 动态获取下载链接 (因为 Alpha 版本文件名包含随机哈希，必须动态解析)
+    # 1. 获取 JSON
+    local api_json=$(curl -s "$API_URL")
+    if [[ -z "$api_json" ]] && netstat -tunlp 2>/dev/null | grep -q ":7890 "; then
+         api_json=$(curl -s -x http://127.0.0.1:7890 "$API_URL")
+    fi
+    
+    # 2. 提取对应架构的 .gz 文件 URL
+    # 逻辑：查找 browser_download_url，匹配 linux-{arch}, 排除 .sha256 等文件
+    local DOWNLOAD_URL=$(echo "$api_json" | grep "browser_download_url" | grep "linux-$Download_Arch" | grep ".gz\"" | head -n 1 | sed -E 's/.*"([^"]+)".*/\1/')
+    
+    if [[ -z "$DOWNLOAD_URL" ]]; then
+        echo -e "${RED}错误：未找到适配当前架构 ($Download_Arch) 的下载资源。${NC}"
+        return
+    fi
+
+    echo -e "下载地址: $DOWNLOAD_URL"
     echo -e "${YELLOW}正在下载...${NC}"
-    # 尝试下载 (先直连，失败则尝试代理)
-    wget -T 15 -O "/tmp/mihomo.gz" "$DOWNLOAD_URL" || \
-    wget -e use_proxy=yes -e http_proxy=127.0.0.1:7890 -T 20 -O "/tmp/mihomo.gz" "$DOWNLOAD_URL"
+    
+    # 下载 (带重试和代理回退)
+    wget -T 20 -O "/tmp/mihomo.gz" "$DOWNLOAD_URL" || \
+    wget -e use_proxy=yes -e http_proxy=127.0.0.1:7890 -T 30 -O "/tmp/mihomo.gz" "$DOWNLOAD_URL"
     
     if [[ $? -eq 0 ]]; then
+        echo -e "${YELLOW}停止服务并安装...${NC}"
         systemctl stop mihomo
         gzip -d -c /tmp/mihomo.gz > /usr/local/bin/mihomo
         chmod +x /usr/local/bin/mihomo
         rm /tmp/mihomo.gz
         systemctl start mihomo
-        echo -e "${GREEN}内核更新完成并已重启服务！${NC}"
+        echo -e "${GREEN}内核更新成功！当前版本已变更为: $(/usr/local/bin/mihomo -v | head -n1 | awk '{print $3}')${NC}"
         check_versions force
     else
         echo -e "${RED}下载失败，请检查网络。${NC}"
@@ -126,22 +163,16 @@ function update_core() {
 # 3. 更新 Geo 数据库
 function update_geodb() {
     echo -e "${YELLOW}正在更新 Geo 数据库...${NC}"
-    # 同样增加了代理重试机制
-    local DL_success=0
     for url in \
         "https://github.com/MetaCubeX/meta-rules-dat/releases/download/latest/country.mmdb" \
         "https://github.com/MetaCubeX/meta-rules-dat/releases/download/latest/geosite.dat" \
         "https://github.com/MetaCubeX/meta-rules-dat/releases/download/latest/geoip.dat"; do
         
         filename=$(basename "$url")
-        wget -q --show-progress -O "${CONFIG_DIR}/$filename" "$url"
-        if [ $? -ne 0 ]; then
-             echo -e "${YELLOW}直连下载 $filename 失败，尝试走代理...${NC}"
-             wget -q --show-progress -e use_proxy=yes -e http_proxy=127.0.0.1:7890 -O "${CONFIG_DIR}/$filename" "$url"
-        fi
+        wget -q --show-progress -O "${CONFIG_DIR}/$filename" "$url" || \
+        wget -q --show-progress -e use_proxy=yes -e http_proxy=127.0.0.1:7890 -O "${CONFIG_DIR}/$filename" "$url"
     done
-    
-    echo -e "${GREEN}数据库更新流程结束，正在重启服务...${NC}"
+    echo -e "${GREEN}数据库更新完成，重启服务...${NC}"
     systemctl restart mihomo
 }
 
@@ -160,26 +191,22 @@ function update_ui() {
     fi
 }
 
-# 5. 同步 GitHub 脚本代码
+# 5. 同步脚本
 function git_pull_script() {
-    echo -e "${YELLOW}正在从 GitHub 同步最新脚本...${NC}"
+    echo -e "${YELLOW}正在同步脚本...${NC}"
     if [ -d ".git" ]; then
-        git fetch --all
-        git reset --hard origin/main
-        chmod +x *.sh
-        echo -e "${GREEN}脚本同步完成！请重新运行脚本。${NC}"
-        exit 0
+        git fetch --all; git reset --hard origin/main; chmod +x *.sh
+        echo -e "${GREEN}同步完成，请重新运行。${NC}"; exit 0
     else
-        echo -e "${RED}错误：当前目录不是 Git 仓库，无法同步。${NC}"
+        echo -e "${RED}非 Git 目录，无法同步。${NC}"
     fi
 }
 
 # ================= 初始化 =================
-echo -e "${BLUE}正在初始化并检查版本...${NC}"
+echo -e "${BLUE}正在初始化...${NC}"
 check_versions
 
 # ================= 菜单逻辑 =================
-
 while true; do
     sleep 0.1
     clear
@@ -187,35 +214,24 @@ while true; do
     echo -e "${GREEN}    Mihomo 管理脚本 (Manage Menu)    ${NC}"
     echo -e "${BLUE}=====================================${NC}"
     
-    # === 版本显示区域 ===
-    echo -e "当前内核: ${YELLOW}${CURRENT_VER}${NC}"
-    
-    # 修复了显示逻辑：只有当获取成功且版本不一致时才提示更新
-    if [[ "$LATEST_VER" != "检测中..." ]] && [[ "$LATEST_VER" != *"获取失败"* ]]; then
-        if [[ "$LATEST_VER" != "$CURRENT_VER" ]] && [[ "$CURRENT_VER" != *"未安装"* ]]; then
-             echo -e "最新内核: ${GREEN}${LATEST_VER} (可更新)${NC}"
-        else
-             echo -e "最新内核: ${LATEST_VER} (已最新)"
-        fi
-    else
-         # 如果获取失败，直接显示红色错误信息
-         echo -e "最新内核: ${LATEST_VER}"
-    fi
+    echo -e "当前安装版本: ${YELLOW}${CURRENT_VER}${NC}"
+    echo -e "最新稳定版本: ${LATEST_STABLE_VER}"
+    echo -e "最新 Alpha版: ${LATEST_ALPHA_VER}"
     echo -e "${BLUE}=====================================${NC}"
 
-    echo -e "1. 启动服务 (Start)"
-    echo -e "2. 停止服务 (Stop)"
-    echo -e "3. 重启服务 (Restart)"
-    echo -e "4. 查看运行状态 (Status)"
+    echo -e "1. 启动服务"
+    echo -e "2. 停止服务"
+    echo -e "3. 重启服务"
+    echo -e "4. 查看状态"
     echo -e "-------------------------------------"
-    echo -e "5. 更新 Mihomo 内核 (Update Core)"
-    echo -e "6. 更新 Geo 数据库 (Update GeoDB)"
-    echo -e "7. 更新 UI 面板 (Update UI)"
+    echo -e "5. 更新/切换 Mihomo 内核 (支持 Alpha)"
+    echo -e "6. 更新 Geo 数据库"
+    echo -e "7. 更新 UI 面板"
     echo -e "-------------------------------------"
-    echo -e "8. 查看配置文件 (View Config)"
-    echo -e "9. 查看实时日志 (View Log) [按 Ctrl+C 退出]"
-    echo -e "0. 同步更新本脚本 (Git Pull)"
-    echo -e "q. 退出 (Quit)"
+    echo -e "8. 查看配置"
+    echo -e "9. 查看日志 [Ctrl+C 退出]"
+    echo -e "0. 同步脚本"
+    echo -e "q. 退出"
     echo -e "${BLUE}=====================================${NC}"
     read -p "请输入选项: " choice
 
@@ -223,15 +239,12 @@ while true; do
         1) service_control start ;;
         2) service_control stop ;;
         3) service_control restart ;;
-        4) service_control status; read -p "按回车键继续..." ;;
-        5) update_core; read -p "按回车键继续..." ;;
-        6) update_geodb; read -p "按回车键继续..." ;;
-        7) update_ui; read -p "按回车键继续..." ;;
+        4) service_control status; read -p "按回车继续..." ;;
+        5) update_core; read -p "按回车继续..." ;;
+        6) update_geodb; read -p "按回车继续..." ;;
+        7) update_ui; read -p "按回车继续..." ;;
         8) nano /etc/mihomo/config.yaml ;;
-        9) 
-           echo -e "${YELLOW}正在打开日志... (按 Ctrl+C 返回菜单)${NC}"
-           journalctl -u mihomo -f 
-           ;;
+        9) echo -e "${YELLOW}查看日志...${NC}"; journalctl -u mihomo -f ;;
         0) git_pull_script ;;
         q) exit 0 ;;
         *) echo -e "${RED}无效选项${NC}"; sleep 1 ;;
