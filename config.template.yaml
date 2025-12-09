@@ -1,6 +1,6 @@
 proxy-providers:
   Airport1:
-    url: "{{SUBSCRIPTION_URL}}"   # <--- 这里作为占位符
+    url: "{{SUBSCRIPTION_URL}}"
     type: http
     interval: 86400
     health-check:
