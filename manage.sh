@@ -19,7 +19,7 @@ fi
 # ========================================================
 trap 'echo -e "\n${YELLOW}[提示] 操作已取消，返回主菜单...${NC}"; sleep 1' SIGINT
 
-# ================= 辅助函数：版本检测 (文件名提取Hash版) =================
+# ================= 辅助函数：版本检测 (精准Hash版) =================
 # 定义全局变量
 CURRENT_VER="检测中..."
 LATEST_STABLE_VER="检测中..."
@@ -49,14 +49,18 @@ function fetch_remote_version() {
         # 提取 tag_name
         version=$(echo "$api_res" | grep '"tag_name":' | head -n 1 | sed -E 's/.*"([^"]+)".*/\1/')
         
-        # [修改点] 如果是 Alpha 版本，从文件名中提取 Hash
+        # [修改点] 使用更精准的方式提取 Hash
         if [[ "$is_alpha" == "1" ]]; then
-            # 逻辑：查找包含 mihomo-linux-amd64-alpha-xxxx.gz 的行，提取 xxxx
-            # 即使当前机器是 arm，查 amd64 的文件名也能拿到 hash，因为同一版本的 hash 是一样的
-            commit_sha=$(echo "$api_res" | grep "mihomo-linux-amd64-alpha-" | head -n 1 | sed -E 's/.*alpha-([a-z0-9]+)\.gz.*/\1/')
+            # 先用 grep -oE 提取 "alpha-xxxxxxx.gz" 这一小段，避免受整行 JSON 干扰
+            local raw_filename=$(echo "$api_res" | grep -oE "alpha-[a-f0-9]{6,}\.gz" | head -n 1)
             
-            # 兜底：如果上面的方法没提取到 (防止文件名格式变动)，再尝试用旧方法
-            if [[ -z "$commit_sha" ]] || [[ ${#commit_sha} -gt 10 ]]; then
+            if [[ -n "$raw_filename" ]]; then
+                # 从 "alpha-8a2b3c.gz" 中提取 "8a2b3c"
+                commit_sha=$(echo "$raw_filename" | sed -E 's/alpha-([a-f0-9]+)\.gz/\1/')
+            fi
+            
+            # 兜底：如果文件名提取失败，才尝试用 target_commitish
+            if [[ -z "$commit_sha" ]]; then
                  commit_sha=$(echo "$api_res" | grep '"target_commitish":' | head -n 1 | sed -E 's/.*"([^"]+)".*/\1/' | cut -c 1-7)
             fi
         fi
@@ -65,8 +69,8 @@ function fetch_remote_version() {
     if [[ -z "$version" ]]; then
         echo "${RED}获取失败${NC}"
     else
+        # 只有当 hash 存在且不是 "main" 时才显示
         if [[ -n "$commit_sha" ]] && [[ "$commit_sha" != "main" ]]; then
-            # 显示格式: Prerelease-Alpha (a1b2c3d)
             echo "${version} (${commit_sha})"
         else
             echo "$version"
@@ -77,6 +81,7 @@ function fetch_remote_version() {
 function check_versions() {
     # 1. 获取本地版本
     if [ -f "/usr/local/bin/mihomo" ]; then
+        # 尝试提取版本号
         CURRENT_VER=$(/usr/local/bin/mihomo -v 2>/dev/null | head -n 1 | awk '{print $3}')
     else
         CURRENT_VER="${RED}未安装${NC}"
