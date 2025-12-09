@@ -84,12 +84,8 @@ SHOW_PUBLIC_IP=""
 SHOW_CONFIG_PATH=""
 
 function get_dashboard_info() {
-    # 如果未安装，直接跳过信息获取
-    if [[ "$IS_INSTALLED" -eq 0 ]]; then
-        return
-    fi
+    if [[ "$IS_INSTALLED" -eq 0 ]]; then return; fi
 
-    # 1. 智能检测配置文件路径
     if [ -f "${CONFIG_DIR}/config.yaml" ]; then
         SHOW_CONFIG_PATH="${CONFIG_DIR}/config.yaml"
         SHOW_PORT=$(grep '^external-controller:' "${CONFIG_DIR}/config.yaml" | awk -F ':' '{print $NF}' | tr -d ' "')
@@ -99,10 +95,9 @@ function get_dashboard_info() {
     else
         SHOW_CONFIG_PATH="${RED}${CONFIG_DIR}/config.yaml (未找到)${NC}"
         SHOW_SECRET="${RED}无配置${NC}"
-        SHOW_PORT="9090" # 默认端口仅用于显示，实际可能未运行
+        SHOW_PORT="9090"
     fi
 
-    # 2. 获取 IP
     SHOW_LOCAL_IP=$(hostname -I | awk '{print $1}')
     [ -z "$SHOW_LOCAL_IP" ] && SHOW_LOCAL_IP="127.0.0.1"
     
@@ -177,6 +172,7 @@ function install_mihomo() {
     chmod +x /usr/local/bin/mihomo
     rm /tmp/mihomo.gz
 
+    # 这里调用更新函数
     update_geodb || return
     update_ui || return
 
@@ -280,7 +276,7 @@ function update_core() {
     fi
 }
 
-# --- 功能 4: 更新 Geo ---
+# --- 功能 4: 更新 Geo [修复版：检测服务是否存在] ---
 function update_geodb() {
     echo -e "${YELLOW}更新数据库...${NC}"
     for url in \
@@ -290,11 +286,18 @@ function update_geodb() {
         wget -q --show-progress -O "${CONFIG_DIR}/$(basename $url)" "$url" || \
         wget -q --show-progress -e use_proxy=yes -e http_proxy=127.0.0.1:7890 -O "${CONFIG_DIR}/$(basename $url)" "$url"
     done
-    echo -e "${GREEN}完成，正在重启服务...${NC}"
-    systemctl restart mihomo
+    
+    echo -e "${GREEN}数据库更新完成。${NC}"
+    
+    # [核心修复] 只有当服务文件存在时，才尝试重启
+    # 防止在全新安装过程中，服务文件还没创建就重启导致报错
+    if [ -f "/etc/systemd/system/mihomo.service" ]; then
+        echo -e "${YELLOW}正在重启服务...${NC}"
+        systemctl restart mihomo
+    fi
 }
 
-# --- 功能 5: 更新 UI ---
+# --- 功能 5: 更新 UI [修复版：检测服务是否存在] ---
 function update_ui() {
     echo -e "${YELLOW}更新 UI...${NC}"
     wget -q -O "/tmp/z.zip" "https://github.com/Zephyruso/zashboard/archive/refs/heads/gh-pages.zip"
@@ -303,7 +306,12 @@ function update_ui() {
         rm -rf "${CONFIG_DIR}/ui/zashboard"
         mv "/tmp/zashboard-gh-pages" "${CONFIG_DIR}/ui/zashboard"
         rm "/tmp/z.zip"
-        echo -e "${GREEN}UI 更新完成${NC}"
+        echo -e "${GREEN}UI 更新完成。${NC}"
+        
+        # [核心修复] 同上，防止安装过程报错
+        if [ -f "/etc/systemd/system/mihomo.service" ]; then
+             systemctl restart mihomo
+        fi
     else
         echo -e "${RED}失败${NC}"
     fi
@@ -372,7 +380,7 @@ while true; do
     sleep 0.1
     clear
     echo -e "${BLUE}=====================================${NC}"
-    echo -e "${GREEN}      Mihomo 全能工具箱 (v2.5)       ${NC}"
+    echo -e "${GREEN}      Mihomo 全能工具箱 (v2.6)       ${NC}"
     echo -e "${BLUE}=====================================${NC}"
     echo -e "当前版本: ${YELLOW}${CURRENT_VER}${NC}"
     echo -e "最新稳定: ${LATEST_STABLE_VER}"
