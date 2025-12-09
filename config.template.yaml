@@ -199,6 +199,9 @@ rules:
   - RULE-SET,adblockmihomo,REJECT       #去广告服务
   - DOMAIN-SUFFIX,020216.xyz,DIRECT
 #  - RULE-SET,userReject,REJECT          #内置反诈规则
+
+# === 【新增】查 IP 网站强制直连 ===
+  - DOMAIN-SUFFIX,ifconfig.me,DIRECT
  
 # 流媒体服务（Youtube、Netflix、TikTok等走流媒体代理组）
   - RULE-SET,youtube_D,🥏Proxy-Stream
