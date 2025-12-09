@@ -18,7 +18,7 @@
 
 ```text
 .
-├── config.template.yaml   # 配置文件模板 (可按需修改规则)
+├── config.yaml   # 配置文件模板 (可按需修改规则)
 ├── install.sh             # 一键安装脚本
 ├── uninstall.sh           # 一键卸载脚本
 └── README.md              # 说明文档
