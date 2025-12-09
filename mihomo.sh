@@ -74,25 +74,33 @@ function check_versions() {
     fi
 }
 
-# ================= 辅助函数：获取面板信息 (新增) =================
+# ================= 辅助函数：获取面板信息 =================
 SHOW_PORT="9090"
 SHOW_SECRET="<未设置>"
 SHOW_LOCAL_IP="..."
 SHOW_PUBLIC_IP="..."
+SHOW_CONFIG_PATH="..."
 
 function get_dashboard_info() {
-    # 1. 读取配置
+    # 1. 智能检测配置文件路径
     if [ -f "${CONFIG_DIR}/config.yaml" ]; then
+        # 存在则显示正常路径
+        SHOW_CONFIG_PATH="${CONFIG_DIR}/config.yaml"
+        
+        # 读取配置内容
         SHOW_PORT=$(grep '^external-controller:' "${CONFIG_DIR}/config.yaml" | awk -F ':' '{print $NF}' | tr -d ' "')
         [ -z "$SHOW_PORT" ] && SHOW_PORT="9090"
         
         SHOW_SECRET=$(grep '^secret:' "${CONFIG_DIR}/config.yaml" | sed 's/^secret: *//;s/"//g;s/'"'"'//g' | tr -d ' ')
         [ -z "$SHOW_SECRET" ] && SHOW_SECRET="<无密码>"
     else
-        SHOW_SECRET="${RED}未安装配置文件${NC}"
+        # 不存在则显示红色提示
+        SHOW_CONFIG_PATH="${RED}${CONFIG_DIR}/config.yaml (未找到)${NC}"
+        SHOW_SECRET="${RED}无配置${NC}"
+        SHOW_PORT="9090"
     fi
 
-    # 2. 获取 IP (超时设为2秒，防止卡顿)
+    # 2. 获取 IP
     SHOW_LOCAL_IP=$(hostname -I | awk '{print $1}')
     [ -z "$SHOW_LOCAL_IP" ] && SHOW_LOCAL_IP="127.0.0.1"
     
@@ -106,17 +114,14 @@ function get_dashboard_info() {
 function install_mihomo() {
     echo -e "${GREEN}=== 开始安装 Mihomo ===${NC}"
 
-    # 1. 检查 Systemd
     if ! command -v systemctl &> /dev/null; then
         echo -e "${RED}错误: 未检测到 Systemd，无法安装。${NC}"; return
     fi
 
-    # 2. 检查模板
     if [[ ! -f "$TEMPLATE_FILE" ]]; then
         echo -e "${RED}错误: 未找到 config.template.yaml 文件！${NC}"; return
     fi
 
-    # 3. 检查依赖
     echo -e "${YELLOW}> 检查系统依赖...${NC}"
     for dep in curl wget unzip gzip; do
         if ! command -v $dep &> /dev/null; then
@@ -131,7 +136,6 @@ function install_mihomo() {
         fi
     done
 
-    # 4. 下载核心
     echo -e "${YELLOW}> 获取最新内核版本...${NC}"
     local ver_info=$(fetch_remote_version "https://api.github.com/repos/MetaCubeX/mihomo/releases/latest" 0)
     if [[ "$ver_info" == *"获取失败"* ]]; then echo -e "${RED}版本获取失败${NC}"; return; fi
@@ -161,11 +165,9 @@ function install_mihomo() {
     chmod +x /usr/local/bin/mihomo
     rm /tmp/mihomo.gz
 
-    # 5. 下载数据库 & UI
     update_geodb || return
     update_ui || return
 
-    # 6. 生成配置
     echo -e "${YELLOW}> 应用配置文件...${NC}"
     cp "$TEMPLATE_FILE" "${CONFIG_DIR}/config.yaml"
     
@@ -181,7 +183,6 @@ function install_mihomo() {
         sed -i "s|{{UI_SECRET}}|$USER_SECRET|g" "${CONFIG_DIR}/config.yaml"
     fi
 
-    # 7. 配置 Systemd
     echo -e "${YELLOW}> 配置系统服务...${NC}"
     cat > /etc/systemd/system/mihomo.service <<EOF
 [Unit]
@@ -202,7 +203,7 @@ EOF
 
     echo -e "${GREEN}=== 安装完成 ===${NC}"
     check_versions force
-    get_dashboard_info # 刷新信息
+    get_dashboard_info
 }
 
 # --- 功能 2: 服务管理 ---
@@ -309,18 +310,35 @@ function git_pull_script() {
 
 # --- 功能 7: 彻底卸载 ---
 function uninstall_mihomo() {
-    echo -e "${RED}=== Mihomo 彻底卸载程序 ===${NC}"
-    read -p "确定要继续吗？(y/n): " confirm
-    if [[ "$confirm" != "y" ]]; then return; fi
+    echo -e "${RED}========================================${NC}"
+    echo -e "${RED}      Mihomo 彻底卸载程序 (慎用)     ${NC}"
+    echo -e "${RED}========================================${NC}"
+    echo -e "${YELLOW}⚠️  警告：此操作将永久删除以下文件：${NC}"
+    echo -e "  1. 服务文件: ${RED}/etc/systemd/system/mihomo.service${NC}"
+    echo -e "  2. 核心程序: ${RED}/usr/local/bin/mihomo${NC}"
+    echo -e "  3. 配置目录: ${RED}/etc/mihomo/${NC} (含配置文件、节点订阅、数据库)"
+    echo -e "${YELLOW}    (若有重要配置，请先手动备份 config.yaml！)${NC}"
+    echo -e "${RED}========================================${NC}"
+    read -p "确认卸载吗？(输入 y 确认): " confirm
 
-    echo -e "${YELLOW}正在清理...${NC}"
+    if [[ "$confirm" != "y" ]]; then
+        echo -e "操作已取消。"
+        return
+    fi
+
+    echo -e "${YELLOW}正在停止服务...${NC}"
     systemctl stop mihomo 2>/dev/null
     systemctl disable mihomo 2>/dev/null
+    
+    echo -e "${YELLOW}删除文件...${NC}"
     rm -f /etc/systemd/system/mihomo.service
     systemctl daemon-reload
     rm -f /usr/local/bin/mihomo
     rm -rf /etc/mihomo
-    echo -e "${GREEN}卸载完成。${NC}"
+    
+    echo -e "${GREEN}Mihomo 已卸载。${NC}"
+    
+    # 刷新状态显示
     check_versions force
     get_dashboard_info
 }
@@ -350,7 +368,7 @@ while true; do
     sleep 0.1
     clear
     echo -e "${BLUE}=====================================${NC}"
-    echo -e "${GREEN}      Mihomo 全能工具箱 (v2.2)       ${NC}"
+    echo -e "${GREEN}      Mihomo 全能工具箱 (v2.3)       ${NC}"
     echo -e "${BLUE}=====================================${NC}"
     echo -e "当前版本: ${YELLOW}${CURRENT_VER}${NC}"
     echo -e "最新稳定: ${LATEST_STABLE_VER}"
@@ -359,7 +377,8 @@ while true; do
     echo -e "内网访问: http://${SHOW_LOCAL_IP}:${SHOW_PORT}/ui"
     echo -e "外网访问: http://${SHOW_PUBLIC_IP}:${SHOW_PORT}/ui"
     echo -e "访问密码: ${YELLOW}${SHOW_SECRET}${NC}"
-    echo -e "配置文件: ${CONFIG_DIR}/config.yaml"
+    # 这里使用了智能检测的变量 SHOW_CONFIG_PATH
+    echo -e "配置文件: ${SHOW_CONFIG_PATH}"
     echo -e "${BLUE}=====================================${NC}"
     echo -e "1. 启动服务      2. 停止服务"
     echo -e "3. 重启服务      4. 查看状态"
