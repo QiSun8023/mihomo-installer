@@ -27,6 +27,11 @@
 | **3. 运行脚本** | `sudo bash install.sh` | 开始自动安装 |
 | **4. 输入订阅** | 按屏幕提示操作 | 脚本跑完后会提示输入订阅链接，粘贴并回车即可。 |
 
+### 📥 一键安装 (Install)
+git clone https://github.com/QiSun8023/mihomo-installer.git \
+  && cd mihomo-installer \
+  && bash install.sh
+
 ### 🗑️ 一键卸载 (Uninstall)
 
 如果您需要彻底清除 Mihomo 及其所有配置，请执行卸载脚本。
