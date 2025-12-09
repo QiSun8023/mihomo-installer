@@ -74,6 +74,29 @@ wget -O "${CONFIG_DIR}/GeoLite2-Country.mmdb" "https://github.com/MetaCubeX/meta
 wget -O "${CONFIG_DIR}/geosite.dat" "https://github.com/MetaCubeX/meta-rules-dat/releases/download/latest/geosite.dat"
 wget -O "${CONFIG_DIR}/geoip.dat" "https://github.com/MetaCubeX/meta-rules-dat/releases/download/latest/geoip.dat"
 
+# 7.5 下载并配置 UI 面板 (Zashboard)
+echo -e "${YELLOW}正在部署 Zashboard 面板...${NC}"
+mkdir -p "${CONFIG_DIR}/ui"
+
+# 下载 Zashboard 的 zip 包
+# 注意：这里使用 gh-pages 分支的压缩包
+wget -O "/tmp/zashboard.zip" "https://github.com/Zephyruso/zashboard/archive/refs/heads/gh-pages.zip"
+
+if [[ $? -eq 0 ]]; then
+    # 解压
+    unzip -q -o "/tmp/zashboard.zip" -d "/tmp/"
+    # 移动并重命名 (GitHub zip 解压后通常叫 zashboard-gh-pages)
+    # 先清理旧目录防止冲突
+    rm -rf "${CONFIG_DIR}/ui/zashboard"
+    mv "/tmp/zashboard-gh-pages" "${CONFIG_DIR}/ui/zashboard"
+    
+    # 清理临时文件
+    rm "/tmp/zashboard.zip"
+    echo -e "UI 面板部署完成: ${CONFIG_DIR}/ui/zashboard"
+else
+    echo -e "${RED}UI 面板下载失败，请稍后手动安装，不影响核心运行。${NC}"
+fi
+
 # 8. 处理配置文件 (核心步骤)
 echo -e "${YELLOW}正在应用配置...${NC}"
 # 复制模板到系统目录
