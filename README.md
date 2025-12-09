@@ -27,10 +27,23 @@
 | **3. 运行脚本** | `sudo bash install.sh` | 开始自动安装 |
 | **4. 输入订阅** | 按屏幕提示操作 | 脚本跑完后会提示输入订阅链接，粘贴并回车即可。 |
 
-### 📥 一键安装 (Install)
-git clone https://github.com/QiSun8023/mihomo-installer.git \
+### 🚀 极速安装 (Quick Start)
+
+请根据您的网络环境选择一种安装方式：
+
+**方式一：标准安装 (推荐)**
+*适用于 VPS、海外服务器或网络环境良好的设备。*
+
+```bash
+git clone --depth 1 [https://github.com/QiSun8023/mihomo-installer.git](https://github.com/QiSun8023/mihomo-installer.git) \
   && cd mihomo-installer \
-  && bash install.sh
+  && sudo bash install.sh
+
+**方式二：国内加速安装**
+*如果您的服务器位于国内，或无法连接 GitHub，请使用此镜像加速命令*
+git clone --depth 1 [https://gh-proxy.com/https://github.com/QiSun8023/mihomo-installer.git](https://gh-proxy.com/https://github.com/QiSun8023/mihomo-installer.git) \
+  && cd mihomo-installer \
+  && sudo bash install.sh
 
 ### 🗑️ 一键卸载 (Uninstall)
 
